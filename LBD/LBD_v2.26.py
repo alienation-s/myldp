@@ -74,7 +74,7 @@ def sw_perturbation_w_event_lbd(values, budgets, min_budget=0.01):
 
 # =========================================================================
 # 主实验接口：控制不同的实验变量
-def run_experiment_lbd(file_path, output_dir, sample_fraction=1.0, total_budget=1.0, w=160, delta=0.5, kp=0.8, ks=0.1, kd=0.1, DTW_MRE=True):
+def run_experiment(file_path, output_dir, sample_fraction=1.0, total_budget=1.0, w=160, delta=0.5, kp=0.8, ks=0.1, kd=0.1, DTW_MRE=True):
     """
     统一接口：控制实验中的各个变量，如数据量、隐私预算、窗口大小等，返回实验结果。
     """
@@ -119,7 +119,7 @@ def compare_experiments(file_path, output_dir, target):
         es = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]
         results = []
         for e in es:
-            result_budget = run_experiment_lbd(file_path, output_dir, sample_fraction=sample_fraction, total_budget=e, w=160, DTW_MRE=True)
+            result_budget = run_experiment(file_path, output_dir, sample_fraction=sample_fraction, total_budget=e, w=160, DTW_MRE=True)
             print(f"DTW for budget {e}: {result_budget['dtw_distance']}, MRE for budget {e}: {result_budget['mre']}")
             results.append(result_budget)
     elif target == "w":
@@ -127,7 +127,7 @@ def compare_experiments(file_path, output_dir, target):
         ws = [80,100,120,140,160,180,200,220,240,260]
         results = []
         for w in ws:
-            result_window = run_experiment_lbd(file_path, output_dir, sample_fraction=sample_fraction, total_budget=1.0, w=w, DTW_MRE=True)
+            result_window = run_experiment(file_path, output_dir, sample_fraction=sample_fraction, total_budget=1.0, w=w, DTW_MRE=True)
             print(f"DTW for window size {w}: {result_window['dtw_distance']}, MRE for window size {w}: {result_window['mre']}")
             results.append(result_window)
 
