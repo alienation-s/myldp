@@ -12,7 +12,7 @@ from joblib import Parallel, delayed
 from mpl_toolkits.mplot3d import Axes3D
 import seaborn as sns
 
-''' x和隐私预算的实验 '''
+''' x和total-budget的实验代码 '''
 def calculate_slope(points):
     x = points[:, 0]
     y = points[:, 1]

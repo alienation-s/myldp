@@ -118,7 +118,21 @@ def compare_experiments(file_path, output_dir, target):
     调用统一接口进行不同变量的实验，返回并对比结果。
     """
     sample_fraction = 0.8
-    if target == "e":
+    if target == "sample_fraction":
+        # 实验 0: 只改变数据量
+        sample_fractions = np.arange(0.5, 1.05, 0.05)  # 生成从 0.5 到 1.0，步长为 0.05 的数组
+        results = []
+        for sample_fraction in sample_fractions:
+            result_sample = run_experiment(
+                file_path, 
+                output_dir, 
+                sample_fraction=sample_fraction, 
+                total_budget=1.0, 
+                w=160, 
+                DTW_MRE=True)
+            print(f"DTW for sample fraction {sample_fraction}: {result_sample['dtw_distance']}, MRE for sample fraction {sample_fraction}: {result_sample['mre']}")
+            results.append(result_sample)
+    elif target == "e":
         # 实验 1: 只改变隐私预算
         es = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]
         results = []
