@@ -1,4 +1,5 @@
 import numpy as np
+import numpy as np
 import pandas as pd
 import os
 from datetime import datetime
@@ -11,22 +12,13 @@ import utils.effiency_utils as effiency_utils
 # =========================================================================
 # Step 2: 显著点采样
 # =========================================================================
+# 使用向量化计算代替循环
 def calculate_slope(points):
-    """
-    使用最小二乘法计算直线的斜率(k)和截距(b)
-    参数:
-        points (np.ndarray): 包含 (x, y) 坐标的点集
-    返回:
-        k: 斜率
-        b: 截距
-    """
     x = points[:, 0]
     y = points[:, 1]
-    n = len(points)
-    k = (n * np.sum(x * y) - np.sum(x) * np.sum(y)) / (n * np.sum(x ** 2) - np.sum(x) ** 2)
-    b = (np.sum(y) - k * np.sum(x)) / n
+    A = np.vstack([x, np.ones(len(x))]).T
+    k, b = np.linalg.lstsq(A, y, rcond=None)[0]
     return k, b
-
 def calculate_angle(k1, k2):
     """
     计算两条直线斜率之间的角度（tan θ）
@@ -38,32 +30,18 @@ def calculate_angle(k1, k2):
     """
     return abs((k2 - k1) / (1 + k1 * k2 + 1e-8))
 def adaptive_angle_threshold(k, gamma, kp=0.8, ks=0.1, kd=0.1):
-    """
-    动态调整角度阈值 alpha, 根据趋势斜率(k)和波动率(gamma)
-    参数:
-        k: 当前直线的斜率
-        gamma: 数据的波动率（fluctuation rate）
-        kp, ks, kd: 动态调整参数
-    返回:
-        tan_alpha: 动态调整后的角度阈值（tan值）
-    """
-    # 避免 abs(k) + gamma 过小
-    denominator = max(abs(k) + gamma + 1e-8, 1e-3)  # 设置最小值为 1e-3
-
-    # 避免 np.exp 溢出
+    denominator = max(abs(k) + gamma + 1e-8, 1e-3)
     exponent = -1 / denominator
-    if exponent > 709:  # 浮点数上限
-        lambda_val = 1.0  # np.exp(exponent) ≈ 1 当 exponent 很大时
+    # 修正条件判断，当分母极小时触发
+    if denominator < 1e-3:
+        lambda_val = 1.0
     else:
         lambda_val = 1 - np.exp(exponent)
-
-    # 计算 alpha 并限制其范围
     alpha = lambda_val * np.pi / 2
-    alpha = np.clip(alpha, 0, np.pi / 2 - 1e-8)  # 确保 alpha 不接近 pi/2
-
-    # 计算 tan(alpha)
+    alpha = np.clip(alpha, 0, np.pi/2 - 1e-8)
     tan_alpha = np.tan(alpha)
     return tan_alpha
+
 def calculate_error(fitted_value, actual_value):
     """
     计算当前点的误差 e(t_i)
@@ -175,15 +153,11 @@ def adaptive_w_event_budget_allocation(slopes, fluctuation_rates, total_budget, 
             pk = 1 - np.exp(slopes[i])
         
         pgamma = 1 - np.exp(-fluctuation_rates[i])
-        
-        # if slopes[i] >= 0:
-        #     pky = 1 - np.exp(-1 / (slopes[i] * fluctuation_rates[i] + 1e-8))
-        # else:
-        #     pky = 1 - np.exp(-slopes[i] / (fluctuation_rates[i] + 1e-8))
         if slopes[i] >= 0:
             pky = 1 - np.exp(-1 / (abs(slopes[i]) * fluctuation_rates[i] + 1e-8))
         else:
             pky = 1 - np.exp(-abs(slopes[i]) / (fluctuation_rates[i] + 1e-8))
+        pky = np.clip(pky, 1e-8, 1 - 1e-8)  
         p = 1 - np.exp(-((pk + pgamma) / (pky + 1e-8)))
         epsilon_i = p * remaining_budget
         epsilon_i = max(epsilon_i, min_budget)
@@ -204,21 +178,20 @@ def sw_perturbation_w_event(values, budgets, min_budget=0.01):
         epsilon = max(epsilon, min_budget)
         denominator = 2 * np.exp(epsilon) * (np.exp(epsilon) - 1 - epsilon)
         if denominator <= 1e-10:
-            perturbed_value = value
+            perturbed_values.append(value)
+            continue
+        b = (epsilon * np.exp(epsilon) - np.exp(epsilon) + 1) / denominator
+        perturb_prob = np.exp(epsilon) / (2 * b * np.exp(epsilon) + 1)
+        if np.random.rand() <= perturb_prob:
+            perturbed_values.append(value)
         else:
-            b = (epsilon * np.exp(epsilon) - np.exp(epsilon) + 1) / denominator
-            perturb_prob = np.exp(epsilon) / (2 * b * np.exp(epsilon) + 1)
-            if np.random.random() <= perturb_prob:
-                perturbed_value = value
-            else:
-                perturbed_value = value + np.random.laplace(scale=b)
-        perturbed_values.append(perturbed_value)
+            perturbed_values.append(value + np.random.laplace(scale=b))
     return perturbed_values
 
 # =========================================================================
 # Step 5: 卡尔曼滤波
 # =========================================================================
-def kalman_filter(perturbed_values, process_variance=1e-4, measurement_variance=1e-2):
+def kalman_filter(perturbed_values, process_variance=5e-4, measurement_variance=5e-3):
     """
     根据论文公式进行卡尔曼滤波平滑。
     """
@@ -236,7 +209,17 @@ def kalman_filter(perturbed_values, process_variance=1e-4, measurement_variance=
 
 # =========================================================================
 # 主实验接口：控制不同的实验变量
-def run_experiment(file_path, output_dir, sample_fraction=1.0, total_budget=1.0, w=160, delta=0.5, kp=0.8, ks=0.1, kd=0.1, DTW_MRE=True):
+def run_experiment(file_path, output_dir, 
+                   sample_fraction=1.0, 
+                   total_budget=1.0, 
+                   w=160, 
+                   delta=0.5, 
+                   kp=0.7, 
+                   ks=0.15, 
+                   kd=0.1,
+                   process_variance=5e-4,  # 新增卡尔曼参数
+                   measurement_variance=5e-3,  # 新增卡尔曼参数
+                   DTW_MRE=True):
     """
     统一接口：控制实验中的各个变量，如数据量、隐私预算、窗口大小等，返回实验结果。
     """
@@ -264,7 +247,7 @@ def run_experiment(file_path, output_dir, sample_fraction=1.0, total_budget=1.0,
     # plot_utils.plot_perturbed_values(data, normalized_data, significant_indices, perturbed_values, output_dir, current_date, sample_fraction)
 
     # Step 5: 卡尔曼滤波平滑
-    smoothed_values = kalman_filter(perturbed_values)
+    smoothed_values = kalman_filter(perturbed_values, process_variance=process_variance, measurement_variance=measurement_variance)
     # plot_utils.plot_kalman_smoothing(data, normalized_data, significant_indices, perturbed_values, smoothed_values, output_dir, current_date, sample_fraction)
 
     # Step 6: 显著点拟合曲线生成
@@ -285,39 +268,3 @@ def run_experiment(file_path, output_dir, sample_fraction=1.0, total_budget=1.0,
         'dtw_distance': dtw_distance,
         'mre': mre
     }
-
-# 统一接口调用
-def compare_experiments(file_path, output_dir, target):
-    """
-    调用统一接口进行不同变量的实验，返回并对比结果。
-    """
-    sample_fraction = 0.8
-    if target == "e":
-        # 实验 1: 只改变隐私预算
-        es = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]
-        results = []
-        for e in es:
-            result_budget = run_experiment(file_path, output_dir, sample_fraction=sample_fraction, total_budget=e, w=160, DTW_MRE=True)
-            # result_budget = run_experiment(file_path, output_dir, sample_fraction=1.0, total_budget=e, w=160, DTW_MRE=False)
-            print(f"DTW for budget {e}: {result_budget['dtw_distance']}, MRE for budget {e}: {result_budget['mre']}")
-            results.append(result_budget)
-    elif target == "w":
-        # 实验 2: 只改变窗口大小
-        ws = [80,100,120,140,160,180,200,220,240,260]
-        results = []
-        for w in ws:
-            result_window = run_experiment(file_path, output_dir, sample_fraction=sample_fraction, total_budget=1.0, w=w, DTW_MRE=True)
-            # result_window = run_experiment(file_path, output_dir, sample_fraction=1.0, total_budget=1.0, w=w, DTW_MRE=False)
-            print(f"DTW for window size {w}: {result_window['dtw_distance']}, MRE for window size {w}: {result_window['mre']}")
-            results.append(result_window)
-
-if __name__ == "__main__":
-    file_path = '../data/HKHS.csv'  # 输入数据路径
-    output_dir = 'results'  # 输出目录
-    os.makedirs(output_dir, exist_ok=True)
-    # effiency_utils.memory_function(run_experiment, file_path, output_dir, sample_fraction=1.0, total_budget=1.0, w=160, delta=0.5, kp=0.8, ks=0.1, kd=0.1, DTW_MRE=False)
-
-    compare_experiments(file_path, output_dir,target="e")
-    compare_experiments(file_path, output_dir,target="w")
-
-    # normalized_data_80, sample_80_smoothed_values, significant_indices_80, perturbed_values_80, piecewise_fitted_values_80 = process(file_path, output_dir, 0.8, 160, 1.0)

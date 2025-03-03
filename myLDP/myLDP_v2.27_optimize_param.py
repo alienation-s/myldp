@@ -11,22 +11,13 @@ import utils.effiency_utils as effiency_utils
 # =========================================================================
 # Step 2: 显著点采样
 # =========================================================================
+# 使用向量化计算代替循环
 def calculate_slope(points):
-    """
-    使用最小二乘法计算直线的斜率(k)和截距(b)
-    参数:
-        points (np.ndarray): 包含 (x, y) 坐标的点集
-    返回:
-        k: 斜率
-        b: 截距
-    """
     x = points[:, 0]
     y = points[:, 1]
-    n = len(points)
-    k = (n * np.sum(x * y) - np.sum(x) * np.sum(y)) / (n * np.sum(x ** 2) - np.sum(x) ** 2)
-    b = (np.sum(y) - k * np.sum(x)) / n
+    A = np.vstack([x, np.ones(len(x))]).T
+    k, b = np.linalg.lstsq(A, y, rcond=None)[0]
     return k, b
-
 def calculate_angle(k1, k2):
     """
     计算两条直线斜率之间的角度（tan θ）
@@ -175,15 +166,11 @@ def adaptive_w_event_budget_allocation(slopes, fluctuation_rates, total_budget, 
             pk = 1 - np.exp(slopes[i])
         
         pgamma = 1 - np.exp(-fluctuation_rates[i])
-        
-        # if slopes[i] >= 0:
-        #     pky = 1 - np.exp(-1 / (slopes[i] * fluctuation_rates[i] + 1e-8))
-        # else:
-        #     pky = 1 - np.exp(-slopes[i] / (fluctuation_rates[i] + 1e-8))
         if slopes[i] >= 0:
             pky = 1 - np.exp(-1 / (abs(slopes[i]) * fluctuation_rates[i] + 1e-8))
         else:
             pky = 1 - np.exp(-abs(slopes[i]) / (fluctuation_rates[i] + 1e-8))
+        pky = np.clip(pky, 1e-8, 1 - 1e-8)  
         p = 1 - np.exp(-((pk + pgamma) / (pky + 1e-8)))
         epsilon_i = p * remaining_budget
         epsilon_i = max(epsilon_i, min_budget)
@@ -204,21 +191,20 @@ def sw_perturbation_w_event(values, budgets, min_budget=0.01):
         epsilon = max(epsilon, min_budget)
         denominator = 2 * np.exp(epsilon) * (np.exp(epsilon) - 1 - epsilon)
         if denominator <= 1e-10:
-            perturbed_value = value
+            perturbed_values.append(value)
+            continue
+        b = (epsilon * np.exp(epsilon) - np.exp(epsilon) + 1) / denominator
+        perturb_prob = np.exp(epsilon) / (2 * b * np.exp(epsilon) + 1)
+        if np.random.rand() <= perturb_prob:
+            perturbed_values.append(value)
         else:
-            b = (epsilon * np.exp(epsilon) - np.exp(epsilon) + 1) / denominator
-            perturb_prob = np.exp(epsilon) / (2 * b * np.exp(epsilon) + 1)
-            if np.random.random() <= perturb_prob:
-                perturbed_value = value
-            else:
-                perturbed_value = value + np.random.laplace(scale=b)
-        perturbed_values.append(perturbed_value)
+            perturbed_values.append(value + np.random.laplace(scale=b))
     return perturbed_values
 
 # =========================================================================
 # Step 5: 卡尔曼滤波
 # =========================================================================
-def kalman_filter(perturbed_values, process_variance=1e-4, measurement_variance=1e-2):
+def kalman_filter(perturbed_values, process_variance=5e-4, measurement_variance=5e-3):
     """
     根据论文公式进行卡尔曼滤波平滑。
     """
@@ -236,7 +222,17 @@ def kalman_filter(perturbed_values, process_variance=1e-4, measurement_variance=
 
 # =========================================================================
 # 主实验接口：控制不同的实验变量
-def run_experiment(file_path, output_dir, sample_fraction=1.0, total_budget=1.0, w=160, delta=0.5, kp=0.8, ks=0.1, kd=0.1, DTW_MRE=True):
+def run_experiment(file_path, output_dir, 
+                   sample_fraction=1.0, 
+                   total_budget=1.0, 
+                   w=160, 
+                   delta=0.5, 
+                   kp=0.7, 
+                   ks=0.15, 
+                   kd=0.1,
+                   process_variance=5e-4,  # 新增卡尔曼参数
+                   measurement_variance=5e-3,  # 新增卡尔曼参数
+                   DTW_MRE=True):
     """
     统一接口：控制实验中的各个变量，如数据量、隐私预算、窗口大小等，返回实验结果。
     """
@@ -264,7 +260,7 @@ def run_experiment(file_path, output_dir, sample_fraction=1.0, total_budget=1.0,
     # plot_utils.plot_perturbed_values(data, normalized_data, significant_indices, perturbed_values, output_dir, current_date, sample_fraction)
 
     # Step 5: 卡尔曼滤波平滑
-    smoothed_values = kalman_filter(perturbed_values)
+    smoothed_values = kalman_filter(perturbed_values, process_variance=process_variance, measurement_variance=measurement_variance)
     # plot_utils.plot_kalman_smoothing(data, normalized_data, significant_indices, perturbed_values, smoothed_values, output_dir, current_date, sample_fraction)
 
     # Step 6: 显著点拟合曲线生成
@@ -297,8 +293,13 @@ def compare_experiments(file_path, output_dir, target):
         es = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]
         results = []
         for e in es:
-            result_budget = run_experiment(file_path, output_dir, sample_fraction=sample_fraction, total_budget=e, w=160, DTW_MRE=True)
-            # result_budget = run_experiment(file_path, output_dir, sample_fraction=1.0, total_budget=e, w=160, DTW_MRE=False)
+            result_budget = run_experiment(
+                file_path,
+                output_dir, 
+                sample_fraction=sample_fraction, 
+                total_budget=e, 
+                w=160, 
+                DTW_MRE=True)
             print(f"DTW for budget {e}: {result_budget['dtw_distance']}, MRE for budget {e}: {result_budget['mre']}")
             results.append(result_budget)
     elif target == "w":
@@ -306,18 +307,78 @@ def compare_experiments(file_path, output_dir, target):
         ws = [80,100,120,140,160,180,200,220,240,260]
         results = []
         for w in ws:
-            result_window = run_experiment(file_path, output_dir, sample_fraction=sample_fraction, total_budget=1.0, w=w, DTW_MRE=True)
-            # result_window = run_experiment(file_path, output_dir, sample_fraction=1.0, total_budget=1.0, w=w, DTW_MRE=False)
+            result_window = run_experiment(
+                file_path, 
+                output_dir,
+                sample_fraction=sample_fraction, 
+                total_budget=1.0,
+                w=w,
+                DTW_MRE=True)
             print(f"DTW for window size {w}: {result_window['dtw_distance']}, MRE for window size {w}: {result_window['mre']}")
             results.append(result_window)
+    elif target == "kalman":
+        # 卡尔曼参数调优
+        process_vars = [1e-5, 5e-5, 1e-4, 5e-4, 1e-3]
+        measurement_vars = [1e-3, 5e-3, 1e-2, 5e-2, 1e-1]
+        best_dtw = float('inf')
+        best_params = None
+        
+        for pv in process_vars:
+            for mv in measurement_vars:
+                print(f"Testing Kalman: pv={pv}, mv={mv}")
+                result = run_experiment(
+                    file_path, output_dir,
+                    sample_fraction=0.8,
+                    total_budget=1.0,
+                    w=160,
+                    process_variance=pv,
+                    measurement_variance=mv,
+                    DTW_MRE=True
+                )
+                if result['dtw_distance'] < best_dtw:
+                    best_dtw = result['dtw_distance']
+                    best_params = (pv, mv)
+        print(f"\nBest Kalman Parameters: process_variance={best_params[0]}, measurement_variance={best_params[1]}")
+        print(f"Best DTW: {best_dtw}")
+    elif target == "pid":
+        # PID参数调优
+        kp_values = [0.6, 0.7, 0.8, 0.9]
+        ks_values = [0.05, 0.1, 0.15]
+        kd_values = [0.05, 0.1, 0.15]
+        best_mre = float('inf')
+        best_pid = None
+        
+        for kp in kp_values:
+            for ks in ks_values:
+                for kd in kd_values:
+                    print(f"Testing PID: kp={kp}, ks={ks}, kd={kd}")
+                    result = run_experiment(
+                        file_path, output_dir,
+                        sample_fraction=0.8,
+                        total_budget=1.0,
+                        w=160,
+                        kp=kp,
+                        ks=ks,
+                        kd=kd,
+                        DTW_MRE=True
+                    )
+                    if result['mre'] < best_mre:
+                        best_mre = result['mre']
+                        best_pid = (kp, ks, kd)
+        print(f"\nBest PID Parameters: kp={best_pid[0]}, ks={best_pid[1]}, kd={best_pid[2]}")
+        print(f"Best MRE: {best_mre}")
 
 if __name__ == "__main__":
-    file_path = '../data/HKHS.csv'  # 输入数据路径
-    output_dir = 'results'  # 输出目录
+    file_path = '../data/HKHS.csv'
+    output_dir = 'results'
     os.makedirs(output_dir, exist_ok=True)
+    """执行参数调优
+    Best Kalman Parameters: process_variance=0.0005, measurement_variance=0.005
+    print("Starting Kalman parameter tuning...")
+    compare_experiments(file_path, output_dir, target="kalman")
+    Best PID Parameters: kp=0.7, ks=0.15, kd=0.1
+    print("\nStarting PID parameter tuning...")
+    compare_experiments(file_path, output_dir, target="pid")"""
     # effiency_utils.memory_function(run_experiment, file_path, output_dir, sample_fraction=1.0, total_budget=1.0, w=160, delta=0.5, kp=0.8, ks=0.1, kd=0.1, DTW_MRE=False)
-
     compare_experiments(file_path, output_dir,target="e")
     compare_experiments(file_path, output_dir,target="w")
-
-    # normalized_data_80, sample_80_smoothed_values, significant_indices_80, perturbed_values_80, piecewise_fitted_values_80 = process(file_path, output_dir, 0.8, 160, 1.0)

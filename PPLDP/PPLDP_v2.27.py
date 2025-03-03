@@ -7,8 +7,11 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
 import utils.data_utils as data_utils
 import utils.plot_utils as plot_utils
 import utils.effiency_utils as effiency_utils
+# 需要在文件开头添加以下导入
 from concurrent.futures import ThreadPoolExecutor
-
+# =========================================================================
+# Step 2: 显著点采样
+# =========================================================================
 # 使用向量化计算代替循环
 def calculate_slope(points):
     x = points[:, 0]
@@ -19,9 +22,13 @@ def calculate_slope(points):
 def calculate_angle(k1, k2):
     """
     计算两条直线斜率之间的角度（tan θ）
+    参数:
+        k1: 当前拟合直线的斜率
+        k2: 新增点形成的直线的斜率
+    返回:
+        tan_theta: 两条直线的夹角的tan值
     """
     return abs((k2 - k1) / (1 + k1 * k2 + 1e-8))
-
 def adaptive_angle_threshold(k, gamma, kp=0.8, ks=0.1, kd=0.1):
     denominator = max(abs(k) + gamma + 1e-8, 1e-3)
     exponent = -1 / denominator
@@ -38,6 +45,11 @@ def adaptive_angle_threshold(k, gamma, kp=0.8, ks=0.1, kd=0.1):
 def calculate_error(fitted_value, actual_value):
     """
     计算当前点的误差 e(t_i)
+    参数:
+        fitted_value (float): 拟合值
+        actual_value (float): 实际值
+    返回:
+        error (float): 当前点的误差
     """
     return abs(fitted_value - actual_value)
 
@@ -110,14 +122,26 @@ def remarkable_point_sampling(data, original_data, kp=0.8, ks=0.1, kd=0.1, pi=5)
                     break
         else:  # 如果内层循环没有break，则i递增
             i += 1
+    
     # 确保最后一个点被包含
     if points[-1] != n - 1:
         points.append(n - 1)
     
     return points
+
+# =========================================================================
+# Step 3: 自适应预算分配
+# =========================================================================
 def adaptive_w_event_budget_allocation(slopes, fluctuation_rates, total_budget, w):
     """
-    自适应预算分配
+    完全按照论文公式(15)-(18)实现的自适应预算分配
+    Args:
+        slopes: 采样点斜率数组
+        fluctuation_rates: 采样点波动率数组
+        total_budget: 总隐私预算ε
+        w: 窗口大小
+    Returns:
+        allocated_budgets: 每个采样点分配的预算数组
     """
     num_points = len(slopes)
     allocated = np.zeros(num_points)
@@ -163,6 +187,9 @@ def adaptive_w_event_budget_allocation(slopes, fluctuation_rates, total_budget, 
     
     return allocated
 
+# =========================================================================
+# Step 4: SW扰动机制
+# =========================================================================
 def sw_perturbation_w_event(values, budgets, min_budget=0.01):
     epsilons = np.maximum(budgets, min_budget)
     denominators = 2 * np.exp(epsilons) * (np.exp(epsilons) - 1 - epsilons)
@@ -186,6 +213,9 @@ def sw_perturbation_w_event(values, budgets, min_budget=0.01):
     
     return perturbed
 
+# =========================================================================
+# Step 5: 卡尔曼滤波
+# =========================================================================
 def kalman_filter(perturbed_values, process_variance=5e-4, measurement_variance=5e-3):
     n = len(perturbed_values)
     estimates = np.empty(n)
@@ -205,7 +235,6 @@ def kalman_filter(perturbed_values, process_variance=5e-4, measurement_variance=
         # 动态调整参数（可选）
         # process_variance *= 0.99  # 随时间衰减的过程噪声
     return estimates
-
 # =========================================================================
 # 主实验接口：控制不同的实验变量
 def run_experiment(file_path, output_dir, 
@@ -220,13 +249,10 @@ def run_experiment(file_path, output_dir,
                    measurement_variance=5e-3,
                    DTW_MRE=True):
     # 数据预处理优化
-    # data, original_values = data_utils.preprocess_HKHS_data(
-    #     file_path, 
-    #     sample_fraction,
-    # )
-    data, original_values = data_utils.preprocess_heartrate_data(
+    data, original_values = data_utils.preprocess_HKHS_data(
         file_path, 
         sample_fraction,
+        # cache=True  # 假设支持缓存
     )
     normalized_data = data['sample_normalized_value'].values
     original_data = data['normalized_value'].values
@@ -310,7 +336,7 @@ def compare_experiments(file_path, output_dir, target):
     """
     调用统一接口进行不同变量的实验，返回并对比结果。
     """
-    sample_fraction = 0.8
+    sample_fraction = 1.0
     if target == "sample_fraction":
         # 实验 0: 只改变数据量
         sample_fractions = np.arange(0.5, 1.05, 0.05)  # 生成从 0.5 到 1.0，步长为 0.05 的数组
@@ -327,8 +353,7 @@ def compare_experiments(file_path, output_dir, target):
             results.append(result_sample)
     if target == "e":
         # 实验 1: 只改变隐私预算
-        # es = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]
-        es = [1,2,3,4,5,6,7,8,9,10]
+        es = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]
         results = []
         for e in es:
             result_budget = run_experiment(
@@ -356,11 +381,10 @@ def compare_experiments(file_path, output_dir, target):
             results.append(result_window)
 
 if __name__ == "__main__":
-    # file_path = '../data/HKHS.csv'
-    file_path = '../data/heartrate.csv'
-    output_dir = 'results'
+    file_path = '../data/HKHS.csv'  # 输入数据路径
+    output_dir = 'results'  # 输出目录
     os.makedirs(output_dir, exist_ok=True)
-    # effiency_utils.memory_function(run_experiment, file_path, output_dir, sample_fraction=1.0, total_budget=1.0, w=160, delta=0.5, kp=0.8, ks=0.1, kd=0.1, DTW_MRE=False)
-    # compare_experiments(file_path, output_dir,target="sample_fraction")
+    # eff_result = effiency_utils.memory_function(run_experiment, file_path, output_dir, sample_fraction=1.0, total_budget=1.0, w=160, delta=0.5, kp=0.8, ks=0.1, kd=0.1, DTW_MRE=False)
     compare_experiments(file_path, output_dir,target="e")
     compare_experiments(file_path, output_dir,target="w")
+    # normalized_data_80, sample_80_smoothed_values, significant_indices_80, perturbed_values_80, piecewise_fitted_values_80 = process(file_path, output_dir, 0.8, 160, 1.0)

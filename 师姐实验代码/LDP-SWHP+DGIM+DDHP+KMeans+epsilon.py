@@ -12,6 +12,8 @@ import noisefirst as nf
 import matplotlib.pyplot as plt
 import DGIM as dj
 data_path = 'E:/系统缓存/桌面/论文修改/实验代码/数据集区间文件流/'
+data_path = '/Users/alasong/Documents/workspace/PP_LDP/师姐实验代码/数据集区间文件流/'
+
 partition_param=9
 # LDP-SHWP下MSE集合
 resultMse=[]
@@ -78,7 +80,7 @@ def kmeans(dataSet, k):
 
 # 创建数据集
 def createDataSet():
-    data_path = 'E:/系统缓存/桌面/论文修改/实验代码/Car1.csv'
+    data_path = '/Users/alasong/Documents/workspace/PP_LDP/师姐实验代码/Car1.csv'
     df = pd.read_csv(data_path)
     window=100
     t=1000
@@ -224,12 +226,12 @@ for epsilon3 in epsilon3List:
     resultMse.append(mse)
 
 ########################################DDHP算法########################################
-data_path = 'E:/系统缓存/桌面/南宝研二/差分隐私/基础/莫磊/AHPM-SW coding/Car1.xlsx'
+# data_path = 'E:/系统缓存/桌面/南宝研二/差分隐私/基础/莫磊/AHPM-SW coding/Car1.xlsx'
 
 # .xlsx转.csv文件
-data_xls = pd.read_excel(data_path, index_col=0)
-data_xls.to_csv('Car1.csv', encoding='utf-8')
-data_path_csv = 'E:/系统缓存/桌面/论文修改/实验代码/Car1.csv'
+# data_xls = pd.read_excel(data_path, index_col=0)
+# data_xls.to_csv('Car1.csv', encoding='utf-8')
+data_path_csv = '/Users/alasong/Documents/workspace/PP_LDP/师姐实验代码/Car1.csv'
 
 data = np.genfromtxt(data_path_csv, delimiter=',', names=True)
 epsilonDList=[0.5,1.0,1.5,2.0,2.5]
@@ -378,12 +380,12 @@ for epsilon_w_D in epsilonDList:
     resultMseD.append(mseD)
 ########################################CSLS-LDP算法########################################
 
-data_path = 'E:/系统缓存/桌面/南宝研二/差分隐私/基础/莫磊/AHPM-SW coding/Car1.xlsx'
+# data_path = 'E:/系统缓存/桌面/南宝研二/差分隐私/基础/莫磊/AHPM-SW coding/Car1.xlsx'
 
-# .xlsx转.csv文件
-data_xls = pd.read_excel(data_path, index_col=0)
-data_xls.to_csv('Car1.csv', encoding='utf-8')
-data_path_csv = 'E:/系统缓存/桌面/论文修改/实验代码/Car1.csv'
+# # .xlsx转.csv文件
+# data_xls = pd.read_excel(data_path, index_col=0)
+# data_xls.to_csv('Car1.csv', encoding='utf-8')
+data_path_csv = '/Users/alasong/Documents/workspace/PP_LDP/师姐实验代码/Car1.csv'
 
 data = np.genfromtxt(data_path_csv, delimiter=',', names=True)
 epsilonCList=[0.5,1.0,1.5,2.0,2.5]
