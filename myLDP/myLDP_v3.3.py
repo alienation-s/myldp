@@ -54,8 +54,8 @@ def compare_experiments(file_path, output_dir, target):
             results.append(result_window)
 
 if __name__ == "__main__":
-    # file_path = '../data/HKHS.csv'
-    file_path = '../data/heartrate.csv'
+    # file_path = 'data/HKHS.csv'
+    file_path = 'data/heartrate.csv'
     output_dir = 'results'
     os.makedirs(output_dir, exist_ok=True)
     # effiency_utils.memory_function(run_experiment, file_path, output_dir, sample_fraction=1.0, total_budget=1.0, w=160, delta=0.5, kp=0.8, ks=0.1, kd=0.1, DTW_MRE=False)
