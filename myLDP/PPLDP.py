@@ -205,7 +205,11 @@ def run_experiment(file_path, output_dir,
     #     file_path, 
     #     sample_fraction,
     # )
-    sample_data, origin_data = data_utils.preprocess_heartrate_data(
+    # sample_data, origin_data = data_utils.preprocess_heartrate_data(
+    #     file_path, 
+    #     sample_fraction,
+    # ) # ['date', 'normalized_value'] 两个都是这样的格式
+    sample_data, origin_data = data_utils.preprocess_ELD_data(
         file_path, 
         sample_fraction,
     ) # ['date', 'normalized_value'] 两个都是这样的格式

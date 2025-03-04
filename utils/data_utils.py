@@ -67,6 +67,43 @@ def preprocess_heartrate_data(file_path, sample_fraction=1.0):
     # 返回采样后的数据和原始数据
     return sample_data, origin_data
 
+def preprocess_ELD_data(file_path, sample_fraction=1.0):
+    """
+    预处理 Electricity Load Diagrams 数据。
+    参数:
+        file_path (str): CSV 文件路径
+        sample_fraction (float): 采样比例, 默认为 1.0 表示使用全部数据
+    返回:
+        sample_data (pd.DataFrame): 采样后的数据，包括日期和归一化后的值
+        origin_data (pd.DataFrame): 原始数据，包括日期和归一化后的值
+    """
+    # 读取 CSV 文件
+    data = pd.read_csv(file_path)
+    data['date'] = pd.to_datetime(data['date'], format='%Y-%m-%d %H:%M:%S')
+    data = data.sort_values(by='date')
+
+    # 归一化处理
+    data['normalized_value'] = (data['value'] - np.mean(data['value'])) / np.std(data['value'])
+
+    # 原始数据
+    origin_data = data[['date', 'normalized_value']].copy()
+
+    # 如果需要采样
+    if sample_fraction < 1.0:
+        data = data.sample(frac=sample_fraction, random_state=9999).sort_values(by='date')
+
+    # 采样后的数据
+    sample_data = data[['date', 'normalized_value']].copy()
+
+    # 返回采样后的数据和原始数据
+    return sample_data, origin_data
+
+# 示例使用
+# file_path = '/Users/alasong/Documents/workspace/PP_LDP/data/LD.csv'  # 替换为你的 CSV 文件路径
+# sample_data, origin_data = process_ELD_data(file_path, sample_fraction=0.8)
+# print(sample_data)
+# print(origin_data)
+
 def calculate_mre(perturbed_values, normalized_values):
     mre = np.mean(np.abs(perturbed_values - normalized_values) / (np.abs(normalized_values) + np.abs(perturbed_values) + 1e-8))
     return mre

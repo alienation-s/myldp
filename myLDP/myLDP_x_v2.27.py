@@ -14,14 +14,18 @@ sampling_rates = np.round(np.arange(0.1, 1.0 + 0.05, 0.05), 2)[::-1]  # 降序�
 epsilon_values = np.round(np.arange(0.1, 1.0 + 0.1, 0.1), 1)
 
 def run_single_experiment(x, eps, file_path):
-    sample_data, origin_data = data_utils.preprocess_heartrate_data(
-        file_path, 
-        x,
-    ) # ['date', 'normalized_value'] 两个都是这样的格式
+    # sample_data, origin_data = data_utils.preprocess_heartrate_data(
+    #     file_path, 
+    #     x,
+    # ) # ['date', 'normalized_value'] 两个都是这样的格式
     # sample_data, origin_data = data_utils.preprocess_HKHS_data(
     #     file_path, 
     #     x,
     # ) # ['date', 'normalized_value'] 两个都是这样的格式
+    sample_data, origin_data = data_utils.preprocess_ELD_data(
+        file_path, 
+        x,
+    ) # ['date', 'normalized_value'] 两个都是这样的格式
     sample_normalized_data = sample_data['normalized_value'].values
     sample_data_length = len(sample_normalized_data)
     origin_normalized_data = origin_data['normalized_value'].values
@@ -172,6 +176,7 @@ def plot_heatmap(df, metric="dtw"):
 if __name__ == "__main__":
     # file_path = "../data/HKHS.csv"
     file_path = '../data/heartrate.csv'
+    file_path = '../data/LD.csv'
 
     df_results = run_experiments_parallel(file_path)
     
@@ -180,7 +185,7 @@ if __name__ == "__main__":
     
     plot_slice_analysis_mre(df_results, y_min=0.1, y_max=1.0)
     
-    plot_slice_analysis_dtw(df_results, y_min=0, y_max=10000)
+    plot_slice_analysis_dtw(df_results, y_min=0, y_max=100000)
     
     # 热力图
     plot_heatmap(df_results, metric="dtw")  # DTW热力图
