@@ -1,12 +1,8 @@
 import numpy as np
-import pandas as pd
 import os
-from datetime import datetime
 import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
 import utils.data_utils as data_utils
-import utils.plot_utils as plot_utils
-import utils.effiency_utils as effiency_utils
 from concurrent.futures import ThreadPoolExecutor
 
 # 使用向量化计算代替循环
@@ -198,9 +194,8 @@ def run_experiment(file_path, output_dir,
                    sample_fraction=1.0, 
                    total_budget=1.0, 
                    w=160, 
-                   delta=0.5, 
-                   kp=0.7, 
-                   ks=0.15, 
+                   kp=0.8, 
+                   ks=0.1, 
                    kd=0.1,
                    process_variance=5e-4,
                    measurement_variance=5e-3,
@@ -210,7 +205,11 @@ def run_experiment(file_path, output_dir,
     #     file_path, 
     #     sample_fraction,
     # )
-    sample_data, origin_data = data_utils.preprocess_heartrate_data(
+    # sample_data, origin_data = data_utils.preprocess_heartrate_data(
+    #     file_path, 
+    #     sample_fraction,
+    # ) # ['date', 'normalized_value'] 两个都是这样的格式
+    sample_data, origin_data = data_utils.preprocess_ELD_data(
         file_path, 
         sample_fraction,
     ) # ['date', 'normalized_value'] 两个都是这样的格式
