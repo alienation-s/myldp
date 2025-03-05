@@ -9,6 +9,7 @@ import utils.data_utils as data_utils
 from joblib import Parallel, delayed
 import seaborn as sns
 import myLDP.PPLDP as PPLDP
+
 ''' x和total-budget的实验代码 '''
 sampling_rates = np.round(np.arange(0.1, 1.0 + 0.05, 0.05), 2)[::-1]  # 降序排列
 epsilon_values = np.round(np.arange(0.1, 1.0 + 0.1, 0.1), 1)
@@ -174,14 +175,9 @@ def plot_heatmap(df, metric="dtw"):
 
 # 主程序
 if __name__ == "__main__":
-<<<<<<< HEAD
-    # file_path = "../data/HKHS.csv"
-    file_path = '../data/heartrate.csv'
-    file_path = '../data/LD.csv'
-=======
-    # file_path = "data/HKHS.csv"
     file_path = 'data/heartrate.csv'
->>>>>>> origin/main
+    file_path = '/data/LD.csv'
+    # file_path = "data/HKHS.csv"
 
     df_results = run_experiments_parallel(file_path)
     
