@@ -116,3 +116,19 @@ def run_experiment(file_path, output_dir, sample_fraction=1.0, total_budget=1.0,
         'dtw_distance': dtw_distance,
         'mre': mre
     }
+
+if __name__ == "__main__":
+    # file_path = 'data/HKHS.csv'  # 输入数据路径
+    # file_path = 'data/heartrate.csv'  # 输入数据路径
+    file_path = 'data/LD.csv'  # 输入数据路径
+    output_dir = 'results'  # 输出目录
+    os.makedirs(output_dir, exist_ok=True)
+    result = run_experiment(
+        file_path, 
+        output_dir, 
+        sample_fraction=1.0, 
+        total_budget=1.0, 
+        w=160, 
+        DTW_MRE=True
+    )
+    print(result['dtw_distance'], result['mre'])

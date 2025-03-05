@@ -122,9 +122,40 @@ def calculate_mre(perturbed_values, normalized_values):
     return mre
 
 from scipy.interpolate import interp1d
-
-from scipy.interpolate import interp1d
-
+def pla_interpolation(sampled_data, origin_length):
+    """
+    基于分段线性近似（PLA）的插值方法
+    参数:
+        sampled_data (pd.DataFrame): 采样后的显著点数据，包含'timestamp'和'perturbed_value'
+        origin_length (int): 原始时间序列长度
+    返回:
+        interpolated_values (np.array): 插值后的完整时间序列
+    """
+    interpolated = np.zeros(origin_length)
+    sampled_indices = sampled_data.index.values
+    sampled_values = sampled_data['perturbed_value'].values
+    
+    for i in range(len(sampled_indices) - 1):
+        start_idx = sampled_indices[i]
+        end_idx = sampled_indices[i+1]
+        start_val = sampled_values[i]
+        end_val = sampled_values[i+1]
+        
+        # 线性插值
+        x = np.arange(start_idx, end_idx+1)
+        interpolated[x] = np.interp(
+            x,
+            [start_idx, end_idx],
+            [start_val, end_val]
+        )
+    
+    # 处理最后一个区间到序列末尾
+    if sampled_indices[-1] < origin_length - 1:
+        start_idx = sampled_indices[-1]
+        start_val = sampled_values[-1]
+        interpolated[start_idx:] = start_val  # 保持最后一个值
+    
+    return interpolated
 def interpolate_missing_points(origin_data, sample_data):
     """
     如果长度一致不进行插值，长度不一致则进行插值。
