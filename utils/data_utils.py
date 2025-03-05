@@ -98,11 +98,24 @@ def preprocess_ELD_data(file_path, sample_fraction=1.0):
     # 返回采样后的数据和原始数据
     return sample_data, origin_data
 
-# 示例使用
-# file_path = '/Users/alasong/Documents/workspace/PP_LDP/data/LD.csv'  # 替换为你的 CSV 文件路径
-# sample_data, origin_data = process_ELD_data(file_path, sample_fraction=0.8)
-# print(sample_data)
-# print(origin_data)
+def preprocess_data(file_path, sample_fraction=1.0):
+    """
+    统一接口，根据文件名调用不同的预处理函数。
+    参数:
+        file_path (str): CSV 文件路径
+        sample_fraction (float): 采样比例, 默认为 1.0 表示使用全部数据
+    返回:
+        sample_data (pd.DataFrame): 采样后的数据，包括日期和归一化后的值
+        origin_data (pd.DataFrame): 原始数据，包括日期和归一化后的值
+    """
+    if 'HKHS' in file_path:
+        return preprocess_HKHS_data(file_path, sample_fraction)
+    elif 'heartrate' in file_path:
+        return preprocess_heartrate_data(file_path, sample_fraction)
+    elif 'LD' in file_path:
+        return preprocess_ELD_data(file_path, sample_fraction)
+    else:
+        raise ValueError("Unsupported file type")
 
 def calculate_mre(perturbed_values, normalized_values):
     mre = np.mean(np.abs(perturbed_values - normalized_values) / (np.abs(normalized_values) + np.abs(perturbed_values) + 1e-8))
