@@ -174,9 +174,14 @@ def plot_heatmap(df, metric="dtw"):
 
 # 主程序
 if __name__ == "__main__":
+<<<<<<< HEAD
     # file_path = "../data/HKHS.csv"
     file_path = '../data/heartrate.csv'
     file_path = '../data/LD.csv'
+=======
+    # file_path = "data/HKHS.csv"
+    file_path = 'data/heartrate.csv'
+>>>>>>> origin/main
 
     df_results = run_experiments_parallel(file_path)
     
