@@ -15,15 +15,7 @@ sampling_rates = np.round(np.arange(0.1, 1.0 + 0.05, 0.05), 2)[::-1]  # 降序�
 epsilon_values = np.round(np.arange(0.1, 1.0 + 0.1, 0.1), 1)
 
 def run_single_experiment(x, eps, file_path):
-    # sample_data, origin_data = data_utils.preprocess_heartrate_data(
-    #     file_path, 
-    #     x,
-    # ) # ['date', 'normalized_value'] 两个都是这样的格式
-    # sample_data, origin_data = data_utils.preprocess_HKHS_data(
-    #     file_path, 
-    #     x,
-    # ) # ['date', 'normalized_value'] 两个都是这样的格式
-    sample_data, origin_data = data_utils.preprocess_ELD_data(
+    sample_data, origin_data = data_utils.preprocess_data(
         file_path, 
         x,
     ) # ['date', 'normalized_value'] 两个都是这样的格式

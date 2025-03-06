@@ -2,7 +2,7 @@ import numpy as np
 import os
 import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
-import LBD  # 修改这里
+import LBD.LBD as LBD
 
 # =========================================================================
 # 统一接口调用
@@ -54,6 +54,8 @@ def compare_experiments(file_path, output_dir, target):
                 DTW_MRE=True)
             print(f"DTW for window size {w}: {result_window['dtw_distance']}, MRE for window size {w}: {result_window['mre']}")
             results.append(result_window)
+    return results
+
 if __name__ == "__main__":
     file_path = 'data/HKHS.csv'  # 输入数据路径
     file_path = 'data/heartrate.csv'  # 输入数据路径

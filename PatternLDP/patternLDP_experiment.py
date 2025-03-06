@@ -3,7 +3,7 @@ import numpy as np
 import os
 import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
-import patternLDP
+import PatternLDP.patternLDP as PatternLDP
 
 # 高层次接口函数 compare_experiments
 def compare_experiments(file_path, output_dir, target):
@@ -13,7 +13,7 @@ def compare_experiments(file_path, output_dir, target):
         sample_fractions = np.arange(0.5, 1.05, 0.05)  # 生成从 0.5 到 1.0，步长为 0.05 的数组
         results = []
         for sample_fraction in sample_fractions:
-            result_sample = patternLDP.run_experiment(
+            result_sample = PatternLDP.run_experiment(
                 file_path, 
                 output_dir, 
                 sample_fraction=sample_fraction, 
@@ -28,7 +28,7 @@ def compare_experiments(file_path, output_dir, target):
         # es = [1,2,3,4,5,6,7,8,9,10]
         results = []
         for e in es:
-            result_budget = patternLDP.run_experiment(
+            result_budget = PatternLDP.run_experiment(
                 file_path,
                 output_dir, 
                 sample_fraction=sample_fraction, 
@@ -42,7 +42,7 @@ def compare_experiments(file_path, output_dir, target):
         ws = [80,100,120,140,160,180,200,220,240,260]
         results = []
         for w in ws:
-            result_window = patternLDP.run_experiment(
+            result_window = PatternLDP.run_experiment(
                 file_path, 
                 output_dir,
                 sample_fraction=sample_fraction, 

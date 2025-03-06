@@ -55,8 +55,8 @@ def pattern_aware_sampling(df, delta=0.02, min_spacing=100, debug=True):
     if sampled_indices[-1] != n - 1:
         sampled_indices.append(n - 1)
 
-    if debug:
-        print(f"Final sampled indices: {sampled_indices}, Total points: {len(sampled_indices)}")
+    # if debug:
+        # print(f"Final sampled indices: {sampled_indices}, Total points: {len(sampled_indices)}")
     
     return sampled_indices
 
@@ -311,6 +311,50 @@ def run_experiment(file_path,
         'mre': mre,
         'alpha': alpha,
         'beta': beta
+    }
+
+def run_single_experiment(x, eps, file_path):
+    sample_data, origin_data = data_utils.preprocess_data(file_path, x)
+    origin_length = len(origin_data)  # 用于后面插值
+    
+    # ========== 2) PLA采样 ==========
+    sample_data = sample_data.reset_index(drop=True)
+    idx_pla = pattern_aware_sampling(sample_data, delta=0.5)
+    sample_data = sample_data.loc[idx_pla].copy().reset_index(drop=True)
+
+    # ========== 3) PID重要度 ==========
+    imp_arr = compute_importance(sample_data, Kp=0.8, Ki=0.1, Kd=0.1, pi=5)
+    sample_data['importance'] = imp_arr
+
+    # ========== 4) 分配预算 (w-event) ==========
+    updated_data, alpha, beta = allocate_privacy_budget(sample_data, eps, 160)
+
+    # ========== 5) 指数随机化 ==========
+    perturbed_vals = importance_aware_randomization(updated_data, theta=1.0, mu=0.1)
+    updated_data['perturbed_value'] = perturbed_vals
+    
+    # ========== 6) 插值 ==========
+    # 需要 'timestamp','perturbed_value'
+    # 这里把 row index 当 timestamp
+    updated_data['timestamp'] = updated_data.index
+    interpolated_values = data_utils.pla_interpolation(updated_data[['timestamp','perturbed_value']], 
+                                            origin_length)
+
+    # ========== 7) 评价指标 (DTW, MRE) ==========
+    dtw_distance = None
+    mre = None
+    if True:
+        original_series = origin_data['normalized_value'].values
+        with ThreadPoolExecutor() as executor:
+            f1 = executor.submit(data_utils.calculate_fdtw, original_series, interpolated_values)
+            f2 = executor.submit(data_utils.calculate_mre, interpolated_values, original_series)
+            dtw_distance = f1.result()
+            mre = f2.result()
+    return {
+        "sampling_rate": x,
+        "epsilon": eps,
+        "dtw": dtw_distance,
+        "mre": mre
     }
 
 if __name__ == "__main__":

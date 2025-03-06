@@ -280,3 +280,68 @@ def run_experiment(file_path, output_dir,
         'dtw_distance': dtw_distance,
         'mre': mre
     }
+
+def run_single_experiment(x, eps, file_path):
+    sample_data, origin_data = data_utils.preprocess_data(
+        file_path, 
+        x,
+    ) # ['date', 'normalized_value'] 两个都是这样的格式
+    sample_normalized_data = sample_data['normalized_value'].values
+    sample_data_length = len(sample_normalized_data)
+    origin_normalized_data = origin_data['normalized_value'].values
+    origin_data_length = len(sample_normalized_data)
+    
+    # 显著点采样（使用优化后的版本）
+    significant_indices = remarkable_point_sampling(
+        sample_normalized_data, 
+        kp=0.8, 
+        ks=0.1, 
+        kd=0.1
+    ) # 获取显著点的索引，是采样后的数据的显著点索引
+    
+    # 特征计算优化
+    slopes = np.gradient(sample_normalized_data[significant_indices])
+    fluctuation_rates = np.abs(slopes) + 1e-8  # 避免零值
+    
+    # 预算分配（使用优化后的版本）
+    allocated_budgets = adaptive_w_event_budget_allocation(
+        slopes, fluctuation_rates, x, 160, sample_data_length
+    )
+    
+    # 扰动（向量化版本）
+    perturbed_values = sw_perturbation_w_event(
+        sample_normalized_data, allocated_budgets
+    )
+    
+    # 卡尔曼滤波（优化版本）
+    smoothed_values = kalman_filter(
+        perturbed_values, process_variance=5e-4, measurement_variance=5e-3
+    )
+    sample_data["smoothed_value"] = smoothed_values
+
+     # 插值
+    interpolated_data = data_utils.interpolate_missing_points(origin_data, sample_data)
+    interpolated_values = interpolated_data['smoothed_value']
+    # 并行计算评估指标
+    dtw_distance = None
+    mre = None
+    if True:
+        with ThreadPoolExecutor() as executor:
+            dtw_future = executor.submit(
+                data_utils.calculate_fdtw,
+                origin_normalized_data,
+                interpolated_values
+            ) # original_series, fitted_series
+            mre_future = executor.submit(
+                data_utils.calculate_mre,
+                interpolated_values,
+                origin_normalized_data
+            ) # perturbed_values, normalized_values
+            dtw_distance = dtw_future.result()
+            mre = mre_future.result()
+    return {
+        "sampling_rate": x,
+        "epsilon": eps,
+        "dtw": dtw_distance,
+        "mre": mre
+    }
