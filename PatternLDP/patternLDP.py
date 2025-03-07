@@ -8,14 +8,85 @@ import os
 import math
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
 import utils.data_utils as data_utils
+import datetime
+def pattern_aware_sampling(df, delta=0.02, min_spacing=100, debug=False):
+    """
+    依据折线近似的方式，从时间序列中选取关键点，
+    若某段拟合误差超过 delta 或者长度超过 min_spacing，则在此段插入最大误差点。
 
-import numpy as np
-import pandas as pd
+    优化要点：
+      1) 将 df['normalized_value'] 转为 NumPy 数组，避免在内层循环反复 df.loc 取值。
+      2) 对内层区间 [last_selected+1, i) 的误差一次性用向量化计算，减少 Python 解释器开销。
 
-import numpy as np
-import pandas as pd
+    参数：
+      df           : DataFrame，至少包含 'normalized_value' 列。
+      delta        : 允许的最大拟合误差阈值。
+      min_spacing  : 在两个采样点之间允许的最大距离（索引差）。
+      debug        : 若为 True，可在采样结束后打印调试信息。
 
-def pattern_aware_sampling(df, delta=0.02, min_spacing=100, debug=True):
+    返回：
+      sampled_indices : 关键点在原 df 中的行索引列表。
+    """
+    n = len(df)
+    if n == 0:
+        return []
+
+    # 将 'normalized_value' 提前转成 NumPy 数组，减少后续循环中对 DataFrame 的访问
+    vals = df['normalized_value'].to_numpy()
+
+    # 采样点索引列表，初始只包含第 0 个点
+    sampled_indices = [0]
+    last_selected = 0
+
+    for i in range(1, n):
+        x1, y1 = last_selected, vals[last_selected]
+        x2, y2 = i, vals[i]
+
+        dx = x2 - x1
+        if dx == 0:
+            # 避免除零错误（除非这里本身就有重复索引）
+            continue
+
+        # 拟合直线 c(x) = slope * x + intercept
+        slope = (y2 - y1) / dx
+        intercept = y1 - slope * x1
+
+        # 如果中间没有点可供评估，直接看是否超 min_spacing
+        if (i - last_selected) <= 1:
+            # 区间内无中间点
+            if (i - last_selected) >= min_spacing:
+                sampled_indices.append(i)
+                last_selected = i
+            continue
+
+        # 对区间 [last_selected+1, i-1] 的所有点做矢量化预测并计算误差
+        jarr = np.arange(last_selected + 1, i)
+        predicted = slope * jarr + intercept
+        actual = vals[jarr]
+        errorarr = np.abs(actual - predicted)
+
+        idxmax = np.argmax(errorarr)          # 最大误差值对应下标在 jarr 的相对位置
+        max_error = errorarr[idxmax]          # 最大误差
+        max_error_idx = jarr[idxmax]          # 转换成 df 中的绝对索引
+
+        # 如果超过允许误差 或者 已经到达 min_spacing
+        if max_error > delta or (i - last_selected) >= min_spacing:
+            # 在最大误差点（或 i）上进行分段
+            # 注：如果 max_error_idx=-1 理论上不太会出现，这里保留对原逻辑的一致性
+            sampled_indices.append(max_error_idx if max_error_idx != -1 else i)
+            last_selected = sampled_indices[-1]
+
+    # 确保最后一个点被加入
+    if sampled_indices[-1] != n - 1:
+        sampled_indices.append(n - 1)
+
+    if debug:
+        print(f"[pattern_aware_sampling_optimized] Selected Indices = {sampled_indices}")
+        print(f"Total {len(sampled_indices)} points from {n} original points.")
+
+    return sampled_indices
+
+def pattern_aware_sampling_bk(df, delta=0.02, min_spacing=100, debug=True):
     n = len(df)
     if n == 0:
         return []
@@ -316,7 +387,7 @@ def run_experiment(file_path,
 def run_single_experiment(x, eps, file_path):
     sample_data, origin_data = data_utils.preprocess_data(file_path, x)
     origin_length = len(origin_data)  # 用于后面插值
-    
+    start_time = datetime.datetime.now()
     # ========== 2) PLA采样 ==========
     sample_data = sample_data.reset_index(drop=True)
     idx_pla = pattern_aware_sampling(sample_data, delta=0.5)
@@ -332,7 +403,8 @@ def run_single_experiment(x, eps, file_path):
     # ========== 5) 指数随机化 ==========
     perturbed_vals = importance_aware_randomization(updated_data, theta=1.0, mu=0.1)
     updated_data['perturbed_value'] = perturbed_vals
-    
+    end_time = datetime.datetime.now()    # 记录结束时间
+    elapsed_time_seconds = (end_time - start_time).total_seconds()
     # ========== 6) 插值 ==========
     # 需要 'timestamp','perturbed_value'
     # 这里把 row index 当 timestamp
@@ -354,7 +426,8 @@ def run_single_experiment(x, eps, file_path):
         "sampling_rate": x,
         "epsilon": eps,
         "dtw": dtw_distance,
-        "mre": mre
+        "mre": mre,
+        "runtime": elapsed_time_seconds
     }
 
 if __name__ == "__main__":

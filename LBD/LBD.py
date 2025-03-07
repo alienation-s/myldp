@@ -220,7 +220,7 @@ def run_experiment(
         'dtw_distance': dtw_distance,
         'mre': mre
     }
-
+import datetime
 def run_single_experiment(x, eps, file_path):
     """
     与原先同名, 保持接口, 在指定采样率 x 和隐私预算 eps 下运行一次.
@@ -229,7 +229,7 @@ def run_single_experiment(x, eps, file_path):
     sample_data, origin_data = data_utils.preprocess_data(file_path, x)
     sample_normalized_data = sample_data['normalized_value'].values
     origin_normalized_data = origin_data['normalized_value'].values
-
+    start_time = datetime.datetime.now()
     slopes = np.gradient(sample_normalized_data)
     fluctuation_rates = np.abs(slopes)
 
@@ -246,7 +246,10 @@ def run_single_experiment(x, eps, file_path):
         w=160,
         min_budget=0.01
     )
-
+    end_time = datetime.datetime.now()    # 记录结束时间
+    
+    # 计算时间差（timedelta 对象），然后获取总秒数
+    elapsed_time_seconds = (end_time - start_time).total_seconds()  
     sample_data["smoothed_value"] = perturbed_values
     interpolated_data = data_utils.interpolate_missing_points(origin_data, sample_data)
     interpolated_values = interpolated_data['smoothed_value']
@@ -269,7 +272,8 @@ def run_single_experiment(x, eps, file_path):
         "sampling_rate": x,
         "epsilon": eps,
         "dtw": dtw_distance,
-        "mre": mre
+        "mre": mre,
+        "runtime": elapsed_time_seconds
     }
 
 if __name__ == "__main__":

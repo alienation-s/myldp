@@ -4,7 +4,7 @@ import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
 import utils.data_utils as data_utils
 from concurrent.futures import ThreadPoolExecutor
-
+import datetime
 # 使用向量化计算代替循环
 def calculate_slope(points):
     x = points[:, 0]
@@ -200,16 +200,7 @@ def run_experiment(file_path, output_dir,
                    process_variance=5e-4,
                    measurement_variance=5e-3,
                    DTW_MRE=True):
-    # 数据预处理优化
-    # sample_data, origin_data = data_utils.preprocess_HKHS_data(
-    #     file_path, 
-    #     sample_fraction,
-    # )
-    # sample_data, origin_data = data_utils.preprocess_heartrate_data(
-    #     file_path, 
-    #     sample_fraction,
-    # ) # ['date', 'normalized_value'] 两个都是这样的格式
-    sample_data, origin_data = data_utils.preprocess_ELD_data(
+    sample_data, origin_data = data_utils.preprocess_data(
         file_path, 
         sample_fraction,
     ) # ['date', 'normalized_value'] 两个都是这样的格式
@@ -220,6 +211,7 @@ def run_experiment(file_path, output_dir,
     # plot_utils.plot_normalized_data(data, normalized_data, sample_fraction, output_dir, current_date)
     
     # 显著点采样（使用优化后的版本）
+    start_time = datetime.datetime.now()  # 记录开始时间
     significant_indices = remarkable_point_sampling(
         sample_normalized_data, 
         kp=kp, 
@@ -248,6 +240,8 @@ def run_experiment(file_path, output_dir,
     smoothed_values = kalman_filter(
         perturbed_values, process_variance=process_variance, measurement_variance=measurement_variance
     )
+    end_time = datetime.datetime.now()    # 记录结束时间
+    elapsed_time = end_time - start_time  # 计算时间差，得到一个 timedelta 对象
     sample_data["smoothed_value"] = smoothed_values
     # plot_utils.plot_kalman_smoothing(data, normalized_data, significant_indices, perturbed_values, smoothed_values, output_dir, current_date, sample_fraction)
 
@@ -292,6 +286,7 @@ def run_single_experiment(x, eps, file_path):
     origin_data_length = len(sample_normalized_data)
     
     # 显著点采样（使用优化后的版本）
+    start_time = datetime.datetime.now()
     significant_indices = remarkable_point_sampling(
         sample_normalized_data, 
         kp=0.8, 
@@ -317,6 +312,9 @@ def run_single_experiment(x, eps, file_path):
     smoothed_values = kalman_filter(
         perturbed_values, process_variance=5e-4, measurement_variance=5e-3
     )
+    end_time = datetime.datetime.now()    # 记录结束时间
+    elapsed_time_seconds = (end_time - start_time).total_seconds()   # 计算时间差，得到一个 timedelta 对象
+
     sample_data["smoothed_value"] = smoothed_values
 
      # 插值
@@ -343,5 +341,6 @@ def run_single_experiment(x, eps, file_path):
         "sampling_rate": x,
         "epsilon": eps,
         "dtw": dtw_distance,
-        "mre": mre
+        "mre": mre,
+        "runtime": elapsed_time_seconds
     }
