@@ -11,8 +11,8 @@ import LBD.LBD as LBD
 import myLDP.PPLDP as PPLDP
 import PatternLDP.patternLDP as patternLDP
 
-sampling_rates = np.round(np.arange(0.2, 1.0 + 0.1, 0.1), 2)  # 0.2~1.0, 步长0.1
-epsilon_values = np.round(np.arange(0.5, 5.0 + 0.5, 0.5), 1)  # 0.5~5.0, 步长0.5
+sampling_rates = np.round(np.arange(0.5, 1.0 + 0.05, 0.05), 2)  # 0.2~1.0, 步长0.1
+epsilon_values = np.round(np.arange(1, 5.0 + 0.5, 0.5), 1)  # 0.5~5.0, 步长0.5
 
 ###########################################
 # 2) 实验并行函数 (修改: 重复10次取平均)

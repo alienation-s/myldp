@@ -9,7 +9,7 @@ import pandas as pd
 import noisefirst as nf
 import matplotlib.pyplot as plt
 import DGIM as dj
-data_path = 'E:/系统缓存/桌面/实验代码/数据集区间文件流/'
+data_path = '/Users/alasong/Documents/workspace/PP_LDP/师姐实验代码/数据集区间文件流/'
 partition_param=9
 # LDP-SHWP下MSE集合
 resultMse=[]
@@ -106,12 +106,12 @@ for size_window in windowList:
     resultMse.append(mse)
 
 ########################################DDHP算法########################################
-data_path = 'E:/系统缓存/桌面/南宝研二/差分隐私/基础/莫磊/AHPM-SW coding/Car1.xlsx'
+# data_path = 'E:/系统缓存/桌面/南宝研二/差分隐私/基础/莫磊/AHPM-SW coding/Car1.xlsx'
 
 # .xlsx转.csv文件
-data_xls = pd.read_excel(data_path, index_col=0)
-data_xls.to_csv('Car1.csv', encoding='utf-8')
-data_path_csv = 'E:/系统缓存/桌面/实验代码/Car1.csv'
+# data_xls = pd.read_excel(data_path, index_col=0)
+# data_xls.to_csv('Car1.csv', encoding='utf-8')
+data_path_csv = '/Users/alasong/Documents/workspace/PP_LDP/师姐实验代码/Car1.csv'
 
 data = np.genfromtxt(data_path_csv, delimiter=',', names=True)
 windowList=[50,100,150,200,250]

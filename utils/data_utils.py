@@ -28,7 +28,7 @@ def preprocess_HKHS_data(file_path, sample_fraction=1.0):
 
     # 如果需要采样
     if sample_fraction < 1.0:
-        data = data.sample(frac=sample_fraction, random_state=9999).sort_values(by='date')
+        data = data.sample(frac=sample_fraction).sort_values(by='date')
 
     # 采样后的数据
     sample_data = data[['date', 'normalized_value']].copy()
@@ -59,7 +59,7 @@ def preprocess_heartrate_data(file_path, sample_fraction=1.0):
 
     # 如果需要采样
     if sample_fraction < 1.0:
-        data = data.sample(frac=sample_fraction, random_state=9999).sort_values(by='date')
+        data = data.sample(frac=sample_fraction).sort_values(by='date')
 
     # 采样后的数据
     sample_data = data[['date', 'normalized_value']].copy()
@@ -90,7 +90,7 @@ def preprocess_ELD_data(file_path, sample_fraction=1.0):
 
     # 如果需要采样
     if sample_fraction < 1.0:
-        data = data.sample(frac=sample_fraction, random_state=9999).sort_values(by='date')
+        data = data.sample(frac=sample_fraction).sort_values(by='date')
 
     # 采样后的数据
     sample_data = data[['date', 'normalized_value']].copy()

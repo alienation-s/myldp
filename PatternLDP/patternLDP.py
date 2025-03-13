@@ -195,97 +195,118 @@ def compute_importance(df, Kp=0.8, Ki=0.1, Kd=0.1, pi=5):
     
     return df['importance'].values
 
-def allocate_privacy_budget(df, total_budget, w=160):
+def allocate_privacy_budget(df, total_budget, w=160, init_alpha=0.5, grad=0.05):
     """
-    df：至少包含 ['importance'] 列。
-    保证在任意 w 个点内预算总和不超过 total_budget。
-    返回： (df复制后, alpha最终值, beta最终值)
+    重要性自适应预算分配：
+    对于每个采样点 i，首先计算当前滑动窗口内剩余预算 ε′ = total_budget - sum(ε[j])，j 从 i-w+1 到 i-1。
+    然后利用论文中公式（11）：p = 1 - exp( - (α/γ[i] + β·γ[i]) )，其中 β = 1 - α，
+    最后分配预算：ε[i] = p * ε′。
+    
+    同时，根据剩余预算动态调整权重 α：
+      - 当剩余预算足够（ε′ > total_budget/2）时，α 下降（分配更多给重要点）；
+      - 当剩余预算不足（ε′ < ε_w，取 ε_w = total_budget/4）时，α 上升；
+      - 否则保持不变。
+      
+    返回：更新后包含 'privacy_budget' 列的 df，以及最后的 α 和 β 值。
     """
     df = df.copy()
-    df['privacy_budget'] = 0.0
-    alpha = 0.5
-    beta  = 0.5
-    
-    # 用于更新 alpha 的小函数
-    def update_alpha(alpha_val, leftover):
-        # 这里可实现论文更复杂的梯度法。示例：基于阈值
-        # leftover = 本窗口剩余预算
-        half_e = total_budget / 2.0
-        e_w    = total_budget / w
-        step   = 0.05
-        
-        if leftover > half_e:
-            # 预算较宽松 => 减小alpha，让重要点多分配
-            alpha_val = max(0.1, alpha_val - step)
-        elif leftover < e_w:
-            # 预算紧张 => 增大alpha
-            alpha_val = min(0.9, alpha_val + step)
-        return alpha_val
-
-    budgets = [0]*len(df)
-    imp_arr = df['importance'].values
+    budgets = [0.0] * len(df)
+    # 初始权重因子
+    alpha = init_alpha
+    beta = 1.0 - alpha
+    epsilon_w = total_budget / 4.0  # 剩余预算下限（可根据需要调整）
     
     for i in range(len(df)):
         start_i = max(0, i - w + 1)
-        used    = sum(budgets[start_i:i])  # 窗口内已用
-        leftover= total_budget - used
+        used = sum(budgets[start_i:i])
+        remaining = total_budget - used
         
-        # 动态调 α
-        alpha = update_alpha(alpha, leftover)
-        beta  = 1.0 - alpha
+        # 动态更新 α（权重因子）
+        if remaining > total_budget / 2.0:
+            alpha = max(0.1, alpha - grad)
+        elif remaining < epsilon_w:
+            alpha = min(0.9, alpha + grad)
+        # β 保持 = 1 - α
+        beta = 1.0 - alpha
         
-        γ = imp_arr[i]
-        if γ == 0:
-            allocated = 0.0
+        gamma_i = df.loc[i, 'importance']
+        if gamma_i < 1e-15:
+            p = 0.0
         else:
-            exponent = - (alpha / γ + beta * γ)
-            p = 1 - math.exp(exponent)
-            allocated = p * leftover
-        
+            # 根据论文公式（11）：p = 1 - exp( - (α/γ + β·γ) )
+            p = 1 - math.exp(- (alpha / gamma_i + beta * gamma_i))
+        allocated = remaining * p
         budgets[i] = allocated
         
-        # 检查加上自己后，窗口是否超限，若超则截断
-        used_incl = sum(budgets[start_i:i+1])
-        if used_incl > total_budget:
-            diff = used_incl - total_budget
-            budgets[i] -= diff
-    
     df['privacy_budget'] = budgets
     return df, alpha, beta
 
+
 def importance_aware_randomization(df, theta=1.0, mu=0.1):
     """
-    df: 至少包含 ['normalized_value','importance','privacy_budget']。
-    对采样点逐个使用区间[ v-b, v+b ]的指数衰减分布。
-    返回：对应行的扰动后值 list。
+    重要性自适应随机响应：
+    根据论文公式（13）–（15），对于每个采样点：
+      1) 计算误差界限 b[i] = ln(theta/γ[i] + mu)；
+      2) 根据预算 ε[i]计算概率因子 q[i] = ε[i] / (2*(1 - exp(-ε[i]*b[i])))；
+      3) 在区间 [v - b, v + b] 上按照概率密度函数
+             Pr(v*|v) = q[i] * exp(-ε[i]*|v* - v|)
+         进行采样（该分布的归一化保证了两边各占 1/2 的概率质量）。
+    
+    下面给出的实现利用逆变换采样：
+      - 对于 x ∈ [v-b, v]（左侧），累积分布函数为
+            F(x) = (q/ε)*(exp(-ε*(v - x)) - exp(-ε*b))
+        解得 x = v - (1/ε)*ln((ε/q)*U + exp(-ε*b))，其中 U ~ Uniform(0, 0.5)；
+      - 对于 x ∈ [v, v+b]（右侧），累积分布函数为
+            F(x) = 0.5 + (q/ε)*(1 - exp(-ε*(x - v)))
+        解得 x = v + (1/ε)*(-ln(1 - (ε/q)*(U - 0.5)))，其中 U ~ Uniform(0.5, 1)；
+      - 最后确保输出在 [v-b, v+b] 内。
+    
+    返回：扰动后的值列表（顺序与 df 对应）。
     """
     df = df.copy()
-    n = len(df)
-    
-    result = []
-    for i in range(n):
-        v  = df.loc[i, 'normalized_value']
-        γ  = df.loc[i, 'importance']
-        ε  = df.loc[i, 'privacy_budget']
+    perturbed_values = []
+    for i in range(len(df)):
+        v = df.loc[i, 'normalized_value']
+        eps = df.loc[i, 'privacy_budget']
+        gamma_i = df.loc[i, 'importance']
         
-        # 计算 b
-        if γ <= 1e-15:
-            b = mu
+        # 计算误差界限 b[i]
+        # 为防止 gamma_i 过小导致分母问题
+        if gamma_i < 1e-15:
+            b = math.log(mu)
         else:
-            val = (theta/γ) + mu
-            b   = mu if val <= 0 else math.log(val)
+            b = math.log(theta / gamma_i + mu)
         
-        lower = v - b
-        upper = v + b
+        # 若预算极小或 b 非正，则不扰动
+        if eps < 1e-15 or b <= 0:
+            perturbed_values.append(v)
+            continue
         
-        if ε < 1e-15 or lower >= upper:
-            # 预算几乎没有 或 边界异常 => 不加噪
-            result.append(v)
+        # 根据归一化要求，q 确定为：
+        denom = 2 * (1 - math.exp(-eps * b))
+        if abs(denom) < 1e-15:
+            q = 1 / (2 * b)
         else:
-            x_star = sample_exponential_interval(v, ε, lower, upper)
-            result.append(x_star)
-    
-    return result
+            q = eps / denom
+        
+        U = random.random()
+        if U < 0.5:
+            # 左侧分支：x ∈ [v-b, v]
+            # F(x) = (q/eps)*(exp(-eps*(v - x)) - exp(-eps*b)) = U
+            term = (eps / q) * U + math.exp(-eps * b)
+            x = v - (1 / eps) * math.log(term)
+        else:
+            # 右侧分支：x ∈ [v, v+b]
+            # F(x) = 0.5 + (q/eps)*(1 - exp(-eps*(x - v))) = U
+            term = 1 - (eps / q) * (U - 0.5)
+            # 为防止 log(0)
+            term = max(term, 1e-15)
+            x = v + (1 / eps) * (-math.log(term))
+        
+        # 保证 x 在 [v-b, v+b] 内
+        x = max(v - b, min(v + b, x))
+        perturbed_values.append(x)
+    return perturbed_values
 
 def sample_exponential_interval(v, eps, lower, upper):
     """
@@ -352,7 +373,7 @@ def run_experiment(file_path,
     updated_data, alpha, beta = allocate_privacy_budget(sample_data, total_budget, w)
 
     # ========== 5) 指数随机化 ==========
-    perturbed_vals = importance_aware_randomization(updated_data, theta=theta, mu=mu)
+    perturbed_vals = importance_aware_randomization(updated_data)
     updated_data['perturbed_value'] = perturbed_vals
     
     # ========== 6) 插值 ==========

@@ -17,7 +17,7 @@ def compare_experiments(file_path, output_dir, target):
                 file_path, 
                 output_dir, 
                 sample_fraction=sample_fraction, 
-                total_budget=1.0, 
+                total_budget=5.0, 
                 w=160, 
                 DTW_MRE=True)
             print(f"DTW for sample fraction {sample_fraction}: {result_sample['dtw_distance']}, MRE for sample fraction {sample_fraction}: {result_sample['mre']}")
@@ -58,6 +58,8 @@ if __name__ == "__main__":
     file_path = 'data/LD.csv'  # 输入数据路径
     output_dir = 'results'  # 输出目录
     os.makedirs(output_dir, exist_ok=True)
-    compare_experiments(file_path, output_dir, target="sample_fraction")
+    for i in range(10):
+        compare_experiments(file_path, output_dir, target="sample_fraction")
+    # compare_experiments(file_path, output_dir, target="sample_fraction")
     # compare_experiments(file_path, output_dir, target="e")
     # compare_experiments(file_path, output_dir, target="w")
