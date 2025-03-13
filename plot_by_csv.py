@@ -111,7 +111,7 @@ def plot_slice_analysis_mre(df, method_name, output_dir="results/comparison",
     save_path = os.path.join(output_dir, f"{method_name}_slice_mre.png")
     plt.savefig(save_path, dpi=150, bbox_inches='tight')
     plt.close()
-
+    
 ###########################################
 # 5) 可视化函数：二维切片分析 (DTW)
 ###########################################
@@ -251,64 +251,38 @@ def create_reduction_table(df, method_name):
 
     return df_merged
 
+def plot_from_saved_csv(csv_files, output_dir="results/comparison"):
+    """
+    从保存的 CSV 文件中读取数据并生成图表。
+    
+    参数:
+      csv_files: 包含 CSV 文件路径的列表
+      output_dir: 存图目录
+    """
+    for csv_file in csv_files:
+        # 从文件名中提取方法名
+        method_name = os.path.basename(csv_file).split('_')[0]
+        
+        # 读取 CSV 文件
+        df = pd.read_csv(csv_file)
+        
+        # 生成图表
+        plot_slice_analysis_mre(df, method_name, output_dir)
+        plot_slice_analysis_dtw(df, method_name, output_dir)
+        # plot_heatmap(df, method_name, metric="dtw", output_dir=output_dir)
+        # plot_heatmap(df, method_name, metric="mre", output_dir=output_dir)
+        # plot_3d_tradeoff(df, method_name, output_dir)
+
 
 ###########################################
 # 主程序
 ###########################################
 if __name__ == "__main__":
-    # 你可以在此修改输入数据与输出目录
-    file_path = "data/LD.csv"
-    # file_path = "data/heartrate.csv"
-    # file_path = "data/HKHS.csv"
     output_dir = "results"
-    os.makedirs(output_dir, exist_ok=True)
-
-    # 下面设置 n_runs=10，表示每个 (sampling_rate, epsilon) 组合重复运行10次再取平均
-    print("Running LBD Experiments...")
-    df_lbd = run_experiments_parallel(file_path, LBD.run_single_experiment)
-
-    print("Running PPLDP Experiments...")
-    df_ppldp = run_experiments_parallel(file_path, PPLDP.run_single_experiment)
-
-    print("Running PatternLDP Experiments...")
-    df_pldp = run_experiments_parallel(file_path, patternLDP.run_single_experiment)
-
-    # 下面分别为三种方法画图
-    plot_slice_analysis_mre(df_lbd,   "LBD",       output_dir="results/comparison/LBD")
-    plot_slice_analysis_dtw(df_lbd,   "LBD",       output_dir="results/comparison/LBD")
-
-    plot_slice_analysis_mre(df_ppldp, "PPLDP",     output_dir="results/comparison/PPLDP")
-    plot_slice_analysis_dtw(df_ppldp, "PPLDP",     output_dir="results/comparison/PPLDP")
-
-    plot_slice_analysis_mre(df_pldp,  "PatternLDP", output_dir="results/comparison/PatternLDP")
-    plot_slice_analysis_dtw(df_pldp,  "PatternLDP", output_dir="results/comparison/PatternLDP")
-
-    # 如果需要“相同采样率各自对比”：
-    res = [df_lbd, df_ppldp, df_pldp]
-    plot_comparison_for_sampling_rates(res, output_dir="results/comparison")
-
-    print("All done! Check the 'results/comparison/' folder for figures.")
-
-    # 生成减少率/提高率表格
-    df_lbd_table   = create_reduction_table(df_lbd,   method_name="LBD")
-    df_ppldp_table = create_reduction_table(df_ppldp, method_name="PPLDP")
-    df_pldp_table  = create_reduction_table(df_pldp,  method_name="PatternLDP")
-
-    # 仅演示打印 LBD 的表格:
-    print("=== LBD: Reduction Table (Head) ===")
-    print(df_lbd_table[[
-        "method", 
-        "sampling_rate", 
-        "epsilon", 
-        "mre", 
-        "runtime", 
-        "mre_reduction", 
-        "runtime_reduction"
-    ]].head(10))
-
-    # 保存结果
-    df_lbd_table.to_csv(os.path.join(output_dir, "LBD_reduction_table.csv"), index=False)
-    df_ppldp_table.to_csv(os.path.join(output_dir, "PPLDP_reduction_table.csv"), index=False)
-    df_pldp_table.to_csv(os.path.join(output_dir, "PatternLDP_reduction_table.csv"), index=False)
-
-    print("Reduction tables saved in:", output_dir)
+     # 从保存的 CSV 文件中读取数据并生成图表
+    csv_files = [
+        os.path.join(output_dir, "LBD_reduction_table.csv"),
+        os.path.join(output_dir, "PPLDP_reduction_table.csv"),
+        os.path.join(output_dir, "PatternLDP_reduction_table.csv")
+    ]
+    plot_from_saved_csv(csv_files, output_dir)
