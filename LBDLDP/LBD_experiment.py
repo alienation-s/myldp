@@ -1,8 +1,11 @@
+import numpy as np
 import os
 import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
-import myLDP.PPLDP as PPLDP
-import numpy as np
+# sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+import LBDLDP.LBD as LBD
+
+# =========================================================================
 # 统一接口调用
 def compare_experiments(file_path, output_dir, target):
     """
@@ -14,14 +17,14 @@ def compare_experiments(file_path, output_dir, target):
         sample_fractions = np.arange(0.5, 1.05, 0.05)  # 生成从 0.5 到 1.0，步长为 0.05 的数组
         results = []
         for sample_fraction in sample_fractions:
-            result_sample = PPLDP.run_experiment(
+            result_sample = LBD.run_experiment(
                 file_path, 
                 output_dir, 
                 sample_fraction=sample_fraction, 
-                total_budget=1.0, 
+                total_budget=10, 
                 w=160, 
                 DTW_MRE=True)
-            print(f"DTW for sample fraction {sample_fraction}: {result_sample['dtw_distance']}, MRE for sample fraction {sample_fraction}: {result_sample['mre']}")
+            print(f"DTW for sample fraction {sample_fraction:.2f}: {result_sample['dtw_distance']:.2f}, MRE for sample fraction {sample_fraction:.2f}: {result_sample['mre']:.8f}")
             results.append(result_sample)
     elif target == "e":
         # 实验 1: 只改变隐私预算
@@ -29,7 +32,7 @@ def compare_experiments(file_path, output_dir, target):
         # es = [1,2,3,4,5,6,7,8,9,10]
         results = []
         for e in es:
-            result_budget = PPLDP.run_experiment(
+            result_budget = LBD.run_experiment(
                 file_path,
                 output_dir, 
                 sample_fraction=sample_fraction, 
@@ -43,7 +46,7 @@ def compare_experiments(file_path, output_dir, target):
         ws = [80,100,120,140,160,180,200,220,240,260]
         results = []
         for w in ws:
-            result_window = PPLDP.run_experiment(
+            result_window = LBD.run_experiment(
                 file_path, 
                 output_dir,
                 sample_fraction=sample_fraction, 
@@ -52,13 +55,14 @@ def compare_experiments(file_path, output_dir, target):
                 DTW_MRE=True)
             print(f"DTW for window size {w}: {result_window['dtw_distance']}, MRE for window size {w}: {result_window['mre']}")
             results.append(result_window)
+    return results
 
 if __name__ == "__main__":
-    # file_path = 'data/HKHS.csv'
-    file_path = 'data/heartrate.csv'
-    output_dir = 'results'
+    file_path = 'data/HKHS.csv'  # 输入数据路径
+    # file_path = 'data/heartrate.csv'  # 输入数据路径
+    # file_path = 'data/LD.csv'  # 输入数据路径
+    output_dir = 'results'  # 输出目录
     os.makedirs(output_dir, exist_ok=True)
-    # effiency_utils.memory_function(run_experiment, file_path, output_dir, sample_fraction=1.0, total_budget=1.0, w=160, delta=0.5, kp=0.8, ks=0.1, kd=0.1, DTW_MRE=False)
-    compare_experiments(file_path, output_dir,target="sample_fraction")
-    # compare_experiments(file_path, output_dir,target="e")
-    # compare_experiments(file_path, output_dir,target="w")
+    compare_experiments(file_path, output_dir, target="sample_fraction")
+    # compare_experiments(file_path, output_dir, target="e")
+    # compare_experiments(file_path, output_dir, target="w")

@@ -7,28 +7,29 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import seaborn as sns
-import LBD.LBD as LBD
+import LBDLDP.LBD as LBD
 import myLDP.PPLDP as PPLDP
 import PatternLDP.patternLDP as patternLDP
 
 sampling_rates = np.round(np.arange(0.50, 1.00 + 0.05, 0.05), 2)  # 0.2~1.0, 步长0.1
-epsilon_values = np.round(np.arange(5.0, 10.0 + 1, 1.0), 1)  # 0.5~5.0, 步长0.5
-
+# sampling_rates = np.round(np.arange(0.50, 1.00 + 0.05, 0.05))  # 0.2~1.0, 步长0.1
+epsilon_values = np.round(np.arange(10.0, 10.0 + 0.5, 0.5))  # 0.5~5.0, 步长0.5
+# sampling_rates = np.array([1.0])  # 取样率只需要1.0
+# epsilon_values = np.array([5.0])  # 取样率只需要1.0
+# epsilon_values = np.round(np.arange(5.0, 10.0 + 0.5, 0.5)) 
 ###########################################
 # 2) 实验并行函数 (修改: 重复10次取平均)
 ###########################################
-def run_experiments_parallel(file_path, run_single_experiment, n_runs=20):
-    """
-    并行运行实验 ( sampling_rate x epsilon )，每个组合重复n_runs次取平均。
-    
-    参数：
-      file_path: 数据路径
-      run_single_experiment: 某个方法的“单次”实验函数
-      n_runs: 对同一参数组合重复的次数 (默认10)
-    
-    返回：
-      包含多行 (sampling_rate, epsilon, dtw, mre, runtime) 的 DataFrame，每行是平均结果。
-    """
+def remove_outliers(arr, scale=3.0):
+    arr = np.array(arr)
+    median = np.median(arr)
+    mad = np.median(np.abs(arr - median))
+    if mad < 1e-8:
+        return arr  # MAD 太小就不剔除
+    filtered = arr[np.abs(arr - median) <= scale * mad]
+    return filtered if len(filtered) > 0 else arr  # 至少保留原值
+
+def run_experiments_parallel(file_path, run_single_experiment, n_runs=15):
     tasks = [(x, eps) for x in sampling_rates for eps in epsilon_values]
     
     results = []
@@ -47,12 +48,19 @@ def run_experiments_parallel(file_path, run_single_experiment, n_runs=20):
         mre_list = [r["mre"] for r in runs_output]
         runtime_list = [r["runtime"] for r in runs_output]
 
+        # 去除离群值
+        dtw_filtered = remove_outliers(dtw_list)
+        mre_filtered = remove_outliers(mre_list)
+        runtime_filtered = remove_outliers(runtime_list)
         results.append({
             "sampling_rate": x,
             "epsilon": eps,
-            "dtw": np.mean(dtw_list),
-            "mre": np.mean(mre_list),
-            "runtime": np.mean(runtime_list),
+            "dtw": np.mean(dtw_filtered),
+            "mre": np.mean(mre_filtered),
+            "runtime": np.mean(runtime_filtered),
+            # "dtw": np.log1p(np.mean(dtw_filtered)),
+            # "mre": np.log1p(np.mean(mre_filtered)),
+            # "runtime": np.log1p(np.mean(runtime_filtered)),
         })
         
     df = pd.DataFrame(results)
@@ -257,9 +265,13 @@ def create_reduction_table(df, method_name):
 ###########################################
 if __name__ == "__main__":
     # 你可以在此修改输入数据与输出目录
-    file_path = "data/LD.csv"
-    # file_path = "data/heartrate.csv"
-    # file_path = "data/HKHS.csv"
+    # file_path = "data/LD.csv"
+    file_path = "data/heartrate.csv"
+    # file_path = "data/HKHS.csv"   
+    # file_path = "data/ETTh1.csv" #可用！！！电力变压器温度 (ETT) 是电力长期部署的关键指标。该数据集由来自中国两个分离县的2年数据组成。为了探索长序列时间序列预测 (LSTF) 问题的粒度，创建了不同的子集，{ETTh1，ETTh2} 为1小时级，ETTm1为15分钟级。每个数据点由目标值 “油温” 和6个功率负载特征组成。火车/val/测试为12/4/4个月。https://opendatalab.com/OpenDataLab/ETT
+    # file_path = "data/exchange_rate.csv"
+    # file_path = "data/national_illness.csv"
+    # file_path = "data/weather.csv"
     output_dir = "results"
     os.makedirs(output_dir, exist_ok=True)
 
@@ -295,8 +307,8 @@ if __name__ == "__main__":
     df_pldp_table  = create_reduction_table(df_pldp,  method_name="PatternLDP")
 
     # 仅演示打印 LBD 的表格:
-    print("=== LBD: Reduction Table (Head) ===")
-    print(df_lbd_table[[
+    print("=== ppldp: Reduction Table (Head) ===")
+    print(df_ppldp_table[[
         "method", 
         "sampling_rate", 
         "epsilon", 
@@ -306,9 +318,9 @@ if __name__ == "__main__":
         "runtime_reduction"
     ]].head(10))
 
-    # 保存结果
-    df_lbd_table.to_csv(os.path.join(output_dir, "LBD_reduction_table.csv"), index=False)
-    df_ppldp_table.to_csv(os.path.join(output_dir, "PPLDP_reduction_table.csv"), index=False)
-    df_pldp_table.to_csv(os.path.join(output_dir, "PatternLDP_reduction_table.csv"), index=False)
+    # # 保存结果
+    df_lbd_table.to_csv(os.path.join(output_dir, "LBD.csv"), index=False)
+    df_ppldp_table.to_csv(os.path.join(output_dir, "PPLDP.csv"), index=False)
+    df_pldp_table.to_csv(os.path.join(output_dir, "PatternLDP.csv"), index=False)
 
     print("Reduction tables saved in:", output_dir)

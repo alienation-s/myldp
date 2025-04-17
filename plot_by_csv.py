@@ -7,7 +7,7 @@ from tqdm import tqdm
 import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import seaborn as sns
-import LBD.LBD as LBD
+import LBDLDP.LBD as LBD
 import myLDP.PPLDP as PPLDP
 import PatternLDP.patternLDP as patternLDP
 

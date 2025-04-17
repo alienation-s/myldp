@@ -21,7 +21,7 @@ def compare_experiments(file_path, output_dir, target):
                 total_budget=1.0, 
                 w=160, 
                 DTW_MRE=True)
-            print(f"DTW for sample fraction {sample_fraction}: {result_sample['dtw_distance']}, MRE for sample fraction {sample_fraction}: {result_sample['mre']}")
+            print(f"DTW for sample fraction {sample_fraction:.2f}: {result_sample['dtw_distance']:.2f}, MRE for sample fraction {sample_fraction:.2f}: {result_sample['mre']:.8f}")
             results.append(result_sample)
     elif target == "e":
         # 实验 1: 只改变隐私预算
@@ -56,6 +56,7 @@ def compare_experiments(file_path, output_dir, target):
 if __name__ == "__main__":
     # file_path = 'data/HKHS.csv'
     file_path = 'data/heartrate.csv'
+    file_path = 'data/LD.csv'
     output_dir = 'results'
     os.makedirs(output_dir, exist_ok=True)
     # effiency_utils.memory_function(run_experiment, file_path, output_dir, sample_fraction=1.0, total_budget=1.0, w=160, delta=0.5, kp=0.8, ks=0.1, kd=0.1, DTW_MRE=False)

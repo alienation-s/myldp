@@ -17,15 +17,15 @@ def compare_experiments(file_path, output_dir, target):
                 file_path, 
                 output_dir, 
                 sample_fraction=sample_fraction, 
-                total_budget=5.0, 
-                w=160, 
+                total_budget=15, 
+                w=120, 
                 DTW_MRE=True)
-            print(f"DTW for sample fraction {sample_fraction}: {result_sample['dtw_distance']}, MRE for sample fraction {sample_fraction}: {result_sample['mre']}")
+            print(f"DTW for sample fraction {sample_fraction:.2f}: {result_sample['dtw_distance']:.2f}, MRE for sample fraction {sample_fraction:.2f}: {result_sample['mre']:.8f}")
             results.append(result_sample)
     elif target == "e":
         # 实验 1: 只改变隐私预算
-        es = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]
-        # es = [1,2,3,4,5,6,7,8,9,10]
+        # es = [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 1]
+        es = [5,10,15,20,25,30,35,40,45,50]
         results = []
         for e in es:
             result_budget = PatternLDP.run_experiment(
@@ -33,7 +33,7 @@ def compare_experiments(file_path, output_dir, target):
                 output_dir, 
                 sample_fraction=sample_fraction, 
                 total_budget=e, 
-                w=160, 
+                w=50, 
                 DTW_MRE=True)
             print(f"DTW for budget {e}: {result_budget['dtw_distance']}, MRE for budget {e}: {result_budget['mre']}")
             results.append(result_budget)
@@ -53,9 +53,9 @@ def compare_experiments(file_path, output_dir, target):
             results.append(result_window)
 
 if __name__ == "__main__":
-    # file_path = 'data/HKHS.csv'  # 输入数据路径
+    file_path = 'data/HKHS.csv'  # 输入数据路径
     # file_path = 'data/heartrate.csv'  # 输入数据路径
-    file_path = 'data/LD.csv'  # 输入数据路径
+    # file_path = 'data/LD.csv'  # 输入数据路径
     output_dir = 'results'  # 输出目录
     os.makedirs(output_dir, exist_ok=True)
     for i in range(10):
