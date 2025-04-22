@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import seaborn as sns
 import LBDLDP.LBD as LBD
-import myLDP.PPLDP as PPLDP
+import PPLDP.PPLDP as PPLDP
 import PatternLDP.patternLDP as patternLDP
 
 sampling_rates = np.round(np.arange(0.50, 1.00 + 0.05, 0.05), 2)  # 0.2~1.0, 步长0.1

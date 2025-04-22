@@ -7,6 +7,8 @@ import sys
 import os
 import math
 import datetime
+import time
+import tracemalloc
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
 import utils.data_utils as data_utils
@@ -78,24 +80,33 @@ def compute_importance(df, Kp=0.8, Ki=0.1, Kd=0.1, pi=5):
     df['importance'] = np.array(pro_list) + np.array(int_list) + np.array(der_list)
     return df['importance'].values
 
-def allocate_privacy_budget(df, total_budget, w=160, init_alpha=0.5, grad=0.05):
+def allocate_privacy_budget(df, total_budget, w=160, init_alpha=0.5):
+    """
+    Allocate per-point privacy budgets with dynamic equilibrium factor as in PatternLDP paper.
+    """
     df = df.copy()
     n = len(df)
     gamma_arr = np.clip(df['importance'].values, 1e-6, None)
     budgets = np.zeros(n)
     alpha = init_alpha
-    epsilon_w = total_budget / 4.0
+    # Correct threshold: total_budget divided by window size w
+    epsilon_w = total_budget / w
 
     for i in range(n):
+        # Compute sum of budgets in the current sliding window
         start_i = max(0, i - w + 1)
-        remaining = total_budget - np.sum(budgets[start_i:i])
+        remaining = total_budget - budgets[start_i:i].sum()
+        # Gradient of equilibrium factor B(α) = α / (1 - α)
+        grad = 1.0 / (1.0 - alpha)**2
+        # Adjust alpha dynamically per Paper Eq.(12)
         if remaining > total_budget / 2.0:
             alpha = max(0.1, alpha - grad)
         elif remaining < epsilon_w:
             alpha = min(0.9, alpha + grad)
         beta = 1.0 - alpha
         gamma_i = gamma_arr[i]
-        p = 1 - np.exp(-(alpha / gamma_i + beta * gamma_i)) if gamma_i >= 1e-15 else 0.0
+        # Proportional function p = 1 - exp(-(α/γ + β γ))
+        p = 1 - np.exp(-(alpha / gamma_i + beta * gamma_i))
         budgets[i] = remaining * p
 
     df['privacy_budget'] = budgets
@@ -180,27 +191,31 @@ def run_experiment(file_path,
         'beta': beta
     }
 
-def run_single_experiment(x, eps, file_path, delta=0.5, theta=1.0, mu=0.1):
+def run_single_experiment(x, eps, file_path, w, delta=0.5, theta=1.0, mu=0.1):
+    # 开始时间和内存监控
+    start_time = time.time()
+    tracemalloc.start()
     sample_data, origin_data = data_utils.preprocess_data(file_path, x)
     origin_length = len(origin_data)
     assert 'date' in sample_data.columns, "'date' column required for PID-based importance."
 
-    start_time = datetime.datetime.now()
     sample_data = sample_data.reset_index(drop=True)
     idx_pla = pattern_aware_sampling_feasible_space(sample_data, delta=delta)
     sample_data = sample_data.loc[idx_pla].copy().reset_index(drop=True)
 
     sample_data['importance'] = compute_importance(sample_data)
-    updated_data, alpha, beta = allocate_privacy_budget(sample_data, eps, 160)
+    updated_data, alpha, beta = allocate_privacy_budget(sample_data, eps, w)
     perturbed_vals = importance_aware_randomization_precise(updated_data, theta=theta, mu=mu)
     updated_data['perturbed_value'] = perturbed_vals
-    end_time = datetime.datetime.now()
 
     updated_data['timestamp'] = updated_data.index
     interpolated_values = data_utils.pla_interpolation(
         updated_data[['timestamp', 'perturbed_value']], origin_length
     )
-
+    # 统计耗时、内存峰值
+    elapsed_time = time.time() - start_time
+    current_mem, peak_mem = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
     original_series = origin_data['normalized_value'].values
     with ThreadPoolExecutor() as executor:
         f1 = executor.submit(data_utils.calculate_fdtw, original_series, interpolated_values)
@@ -213,7 +228,8 @@ def run_single_experiment(x, eps, file_path, delta=0.5, theta=1.0, mu=0.1):
         "epsilon": eps,
         "dtw": dtw_distance,
         "mre": mre,
-        "runtime": (end_time - start_time).total_seconds()
+        "runtime": elapsed_time,
+        "peak_memory": peak_mem / 10**6,
     }
 
 if __name__ == "__main__":

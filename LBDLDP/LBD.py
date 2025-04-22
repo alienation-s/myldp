@@ -6,6 +6,8 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
 import utils.data_utils as data_utils
 from concurrent.futures import ThreadPoolExecutor
 from collections import deque
+import time
+import tracemalloc
 
 def adaptive_w_event_budget_allocation_lbd(
     slopes,
@@ -14,24 +16,7 @@ def adaptive_w_event_budget_allocation_lbd(
     w,
     min_budget=1e-5
 ):
-    """
-    仅用于返回“差异估计预算 (M_{t,1})”和“潜在发布预算 (M_{t,2})”的初始值。
-
-    对照论文 LBD 思路: 
-    1) 在 w 个时刻内, 差异估计累计使用 <= total_budget/2
-    2) 发布累计使用 <= total_budget/2
-    3) 合计 <= total_budget -> 满足 w-event LDP
-    对单条序列, 这里做简化:
-      - 每个时刻的差异估计预算都固定为 dis_eps = total_budget / (2 * w)
-      - 发布预算初始置 0, 最终在 sw_perturbation_w_event_lbd(...) 内根据 dis>err 的决策确定实际使用多少
-
-    参数 slopes, fluctuation_rates 在论文 LBD 中不是必须,
-    这里保留是为了兼容原函数签名, 并示范仅做“恒定分配”即可.
-    """
     num_points = len(slopes)
-    # budgets 数组形状为 (num_points, 2):
-    #   budgets[i, 0] -> 子机制 M_{t,1} (差异估计)
-    #   budgets[i, 1] -> 子机制 M_{t,2} (潜在发布), 先填 0
     budgets = np.zeros((num_points, 2))
 
     dis_eps = total_budget / (2.0 * w)
@@ -48,25 +33,6 @@ def sw_perturbation_w_event_lbd(
     w=160,
     min_budget=0.01
 ):
-    """
-    对应论文中 "Algorithm 1: LBD" 的核心流程:
-      - 子机制 M_{t,1}: 
-        -> 用 budgets[i,0] (dis_epsilon) 做“私有差异估计”, 拿到 c_{t,1}, 
-           计算 dis = (c_{t,1} - r_{t-1})^2 - Var(c_{t,1}).
-      - 子机制 M_{t,2}:
-        -> 计算过去 w-1 个时刻已经用掉的发布预算 used_pub_sum, 
-           remain_pub = total_budget/2 - used_pub_sum
-        -> 假设要用潜在发布预算 pub_eps = remain_pub / 2 (或别的策略), 计算潜在 err
-        -> 如果 dis > err, 则真正发布(再做一次加噪, 并扣除 pub_eps); 否则跳过(近似).
-      - w-event 原则: 在任意长度为 w 的窗里, 差异估计预算总和 + 发布预算总和 <= total_budget.
-        本函数通过:
-          1) 差异估计固定占 total_budget/2 (在 adaptive... 中已设置)
-          2) 发布占 total_budget/2
-          3) 用一个队列 recent_pub_budgets 跟踪过去 w-1 个发布预算之和.
-    
-    返回:
-      perturbed_values: 对应每个时刻 t 的最终发布值 (单条序列).
-    """
     n = len(values)
     perturbed_values = np.zeros(n)
 
@@ -156,13 +122,6 @@ def run_experiment(
     kd=0.1,
     DTW_MRE=True
 ):
-    """
-    与原先的 run_experiment 同名, 保持接口一致, 流程:
-      1) 数据预处理 (采样+归一化)
-      2) 调用 adaptive_w_event_budget_allocation_lbd(...) 得到 (N,2) budgets
-      3) 用 sw_perturbation_w_event_lbd(...) 执行论文式 LBD 机制
-      4) 插值 + 评估 DTW / MRE
-    """
     # Step 1: 数据预处理
     sample_data, origin_data = data_utils.preprocess_data(file_path, sample_fraction)
     sample_normalized_data = sample_data['normalized_value'].values
@@ -221,15 +180,13 @@ def run_experiment(
         'mre': mre
     }
 import datetime
-def run_single_experiment(x, eps, file_path):
-    """
-    与原先同名, 保持接口, 在指定采样率 x 和隐私预算 eps 下运行一次.
-    同样调用上述两阶段逻辑
-    """
+def run_single_experiment(x, eps, file_path, w):
+    # 开始时间和内存监控
+    start_time = time.time()
+    tracemalloc.start()
     sample_data, origin_data = data_utils.preprocess_data(file_path, x)
     sample_normalized_data = sample_data['normalized_value'].values
     origin_normalized_data = origin_data['normalized_value'].values
-    start_time = datetime.datetime.now()
     slopes = np.gradient(sample_normalized_data)
     fluctuation_rates = np.abs(slopes)
 
@@ -237,23 +194,24 @@ def run_single_experiment(x, eps, file_path):
         slopes,
         fluctuation_rates,
         total_budget=eps,
-        w=160
+        w=w
     )
     perturbed_values = sw_perturbation_w_event_lbd(
         sample_normalized_data,
         budgets,
         total_budget=eps,
-        w=160,
+        w=w,
         min_budget=0.01
-    )
-    end_time = datetime.datetime.now()    # 记录结束时间
-    
+    )    
     # 计算时间差（timedelta 对象），然后获取总秒数
-    elapsed_time_seconds = (end_time - start_time).total_seconds()  
     sample_data["smoothed_value"] = perturbed_values
     interpolated_data = data_utils.interpolate_missing_points(origin_data, sample_data)
     interpolated_values = interpolated_data['smoothed_value']
 
+    # 统计耗时、内存峰值
+    elapsed_time = time.time() - start_time
+    current_mem, peak_mem = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
     with ThreadPoolExecutor() as executor:
         dtw_future = executor.submit(
             data_utils.calculate_fdtw,
@@ -268,12 +226,15 @@ def run_single_experiment(x, eps, file_path):
         dtw_distance = dtw_future.result()
         mre = mre_future.result()
 
+    
+
     return {
         "sampling_rate": x,
         "epsilon": eps,
         "dtw": dtw_distance,
         "mre": mre,
-        "runtime": elapsed_time_seconds
+        "runtime": elapsed_time,
+        "peak_memory": peak_mem / 10**6
     }
 
 if __name__ == "__main__":

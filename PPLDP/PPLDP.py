@@ -5,6 +5,8 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
 import utils.data_utils as data_utils
 from concurrent.futures import ThreadPoolExecutor
 import datetime
+import time
+import tracemalloc
 # 使用向量化计算代替循环
 def calculate_slope(points):
     x = points[:, 0]
@@ -208,7 +210,6 @@ def run_experiment(file_path, output_dir,
     sample_data_length = len(sample_normalized_data)
     origin_normalized_data = origin_data['normalized_value'].values
     origin_data_length = len(sample_normalized_data)
-    # plot_utils.plot_normalized_data(data, normalized_data, sample_fraction, output_dir, current_date)
     
     # 显著点采样（使用优化后的版本）
     start_time = datetime.datetime.now()  # 记录开始时间
@@ -275,18 +276,17 @@ def run_experiment(file_path, output_dir,
         'mre': mre
     }
 
-def run_single_experiment(x, eps, file_path):
-    sample_data, origin_data = data_utils.preprocess_data(
-        file_path, 
-        x,
-    ) # ['date', 'normalized_value'] 两个都是这样的格式
+def run_single_experiment(x, eps, file_path, w):
+    # 开始时间和内存监控
+    start_time = time.time()
+    tracemalloc.start()
+    sample_data, origin_data = data_utils.preprocess_data(file_path, x,) # ['date', 'normalized_value'] 两个都是这样的格式
     sample_normalized_data = sample_data['normalized_value'].values
     sample_data_length = len(sample_normalized_data)
     origin_normalized_data = origin_data['normalized_value'].values
     origin_data_length = len(sample_normalized_data)
     
     # 显著点采样（使用优化后的版本）
-    start_time = datetime.datetime.now()
     significant_indices = remarkable_point_sampling(
         sample_normalized_data, 
         kp=0.8, 
@@ -300,7 +300,7 @@ def run_single_experiment(x, eps, file_path):
     
     # 预算分配（使用优化后的版本）
     allocated_budgets = adaptive_w_event_budget_allocation(
-        slopes, fluctuation_rates, x, 160, sample_data_length
+        slopes, fluctuation_rates, x, w, sample_data_length
     )
     
     # 扰动（向量化版本）
@@ -312,14 +312,16 @@ def run_single_experiment(x, eps, file_path):
     smoothed_values = kalman_filter(
         perturbed_values, process_variance=5e-4, measurement_variance=5e-3
     )
-    end_time = datetime.datetime.now()    # 记录结束时间
-    elapsed_time_seconds = (end_time - start_time).total_seconds()   # 计算时间差，得到一个 timedelta 对象
-
     sample_data["smoothed_value"] = smoothed_values
 
      # 插值
     interpolated_data = data_utils.interpolate_missing_points(origin_data, sample_data)
     interpolated_values = interpolated_data['smoothed_value']
+    # 统计耗时、内存峰值
+    elapsed_time = time.time() - start_time
+    current_mem, peak_mem = tracemalloc.get_traced_memory()
+    tracemalloc.stop()
+
     # 并行计算评估指标
     dtw_distance = None
     mre = None
@@ -342,5 +344,6 @@ def run_single_experiment(x, eps, file_path):
         "epsilon": eps,
         "dtw": dtw_distance,
         "mre": mre,
-        "runtime": elapsed_time_seconds
+        "runtime": elapsed_time,
+        "peak_memory": peak_mem / 10**6
     }

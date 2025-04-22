@@ -8,7 +8,7 @@ sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
 import utils.data_utils as data_utils
 from joblib import Parallel, delayed
 import seaborn as sns
-import myLDP.PPLDP as PPLDP
+import PPLDP.PPLDP as PPLDP
 
 ''' x和total-budget的实验代码 '''
 sampling_rates = np.round(np.arange(0.1, 1.0 + 0.05, 0.05), 2)[::-1]  # 降序排列

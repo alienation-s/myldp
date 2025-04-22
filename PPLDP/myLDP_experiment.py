@@ -1,7 +1,7 @@
 import os
 import sys
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
-import myLDP.PPLDP as PPLDP
+import PPLDP.PPLDP as PPLDP
 import numpy as np
 # 统一接口调用
 def compare_experiments(file_path, output_dir, target):

@@ -8,63 +8,78 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import seaborn as sns
 import LBDLDP.LBD as LBD
-import myLDP.PPLDP as PPLDP
+import PPLDP.PPLDP as PPLDP
 import PatternLDP.patternLDP as patternLDP
 
-sampling_rates = np.round(np.arange(0.50, 1.00 + 0.05, 0.05), 2)  # 0.2~1.0, 步长0.1
+# sampling_rates = np.round(np.arange(0.50, 1.00 + 0.05, 0.05), 2)  # 0.2~1.0, 步长0.1
 # sampling_rates = np.round(np.arange(0.50, 1.00 + 0.05, 0.05))  # 0.2~1.0, 步长0.1
-epsilon_values = np.round(np.arange(10.0, 10.0 + 0.5, 0.5))  # 0.5~5.0, 步长0.5
+# epsilon_values = np.round(np.arange(10.0, 10.0 + 0.5, 0.5))  # 0.5~5.0, 步长0.5
 # sampling_rates = np.array([1.0])  # 取样率只需要1.0
 # epsilon_values = np.array([5.0])  # 取样率只需要1.0
 # epsilon_values = np.round(np.arange(5.0, 10.0 + 0.5, 0.5)) 
 ###########################################
 # 2) 实验并行函数 (修改: 重复10次取平均)
 ###########################################
-def remove_outliers(arr, scale=3.0):
-    arr = np.array(arr)
-    median = np.median(arr)
-    mad = np.median(np.abs(arr - median))
-    if mad < 1e-8:
-        return arr  # MAD 太小就不剔除
-    filtered = arr[np.abs(arr - median) <= scale * mad]
-    return filtered if len(filtered) > 0 else arr  # 至少保留原值
+def run_experiments_parallel(file_path,
+                             run_single_experiment,
+                             sampling_rates=None,
+                             epsilon_values=None,
+                             w_values=None,
+                             n_runs=15):
+    """
+    并行执行多组实验，参数组合包括 sampling_rate、epsilon 和 窗口大小 w。
+    返回 DataFrame，列: ['sampling_rate','epsilon','w','dtw','mre','runtime','peak_memory']
+    """
+    # 默认值
+    if sampling_rates is None:
+        sampling_rates = np.arange(0.80, 0.81, 0.05).tolist()  # 0.8~1.0, 步长0.05
+    if epsilon_values is None:
+        epsilon_values = np.arange(0.1, 1.1 , 0.1).tolist()
+    if w_values is None:
+        w_values = np.arange(200, 201, 20).tolist()
 
-def run_experiments_parallel(file_path, run_single_experiment, n_runs=15):
-    tasks = [(x, eps) for x in sampling_rates for eps in epsilon_values]
-    
+    # 三重循环任务：sampling_rate × epsilon × w
+    tasks = [
+        (x, eps, w)
+        for x in sampling_rates
+        for eps in epsilon_values
+        for w in w_values
+    ]
+
+    def remove_outliers(arr, scale=3.0):
+        arr = np.array(arr)
+        med = np.median(arr)
+        mad = np.median(np.abs(arr - med))
+        if mad < 1e-8:
+            return arr
+        filtered = arr[np.abs(arr - med) <= scale * mad]
+        return filtered if len(filtered) > 0 else arr
+
     results = []
-    # 这里的 tqdm 用来显示 (parameter-combinations) 级别的进度
-    for x, eps in tqdm(tasks, desc="Running Experiments", total=len(tasks)):
-        # 对于每个 (sampling_rate, epsilon)，调用 run_single_experiment N 次
-        runs_output = Parallel(n_jobs=-1)(
-            delayed(run_single_experiment)(x, eps, file_path) 
+    for x, eps, w in tqdm(tasks, desc="Running Experiments", total=len(tasks)):
+        # 对每组参数重复 n_runs 次
+        runs = Parallel(n_jobs=-1)(
+            delayed(run_single_experiment)(x, eps, file_path, w)
             for _ in range(n_runs)
         )
-        # runs_output 是一个列表，包含 n_runs 个返回结果
-        # 每个返回结果通常形如 { "sampling_rate": x, "epsilon": eps, "dtw": val, "mre": val, "runtime": val }
 
-        # 把对应的 dtw, mre, runtime 收集起来做平均
-        dtw_list = [r["dtw"] for r in runs_output]
-        mre_list = [r["mre"] for r in runs_output]
-        runtime_list = [r["runtime"] for r in runs_output]
+        # 收集各项指标
+        dtw_list         = [r["dtw"]         for r in runs]
+        mre_list         = [r["mre"]         for r in runs]
+        runtime_list     = [r["runtime"]     for r in runs]
+        peak_mem_list    = [r["peak_memory"] for r in runs]
 
-        # 去除离群值
-        dtw_filtered = remove_outliers(dtw_list)
-        mre_filtered = remove_outliers(mre_list)
-        runtime_filtered = remove_outliers(runtime_list)
         results.append({
             "sampling_rate": x,
-            "epsilon": eps,
-            "dtw": np.mean(dtw_filtered),
-            "mre": np.mean(mre_filtered),
-            "runtime": np.mean(runtime_filtered),
-            # "dtw": np.log1p(np.mean(dtw_filtered)),
-            # "mre": np.log1p(np.mean(mre_filtered)),
-            # "runtime": np.log1p(np.mean(runtime_filtered)),
+            "epsilon":      eps,
+            "w":            w,
+            "dtw":          remove_outliers(dtw_list).mean(),
+            "mre":          remove_outliers(mre_list).mean(),
+            "runtime":      remove_outliers(runtime_list).mean(),
+            "peak_memory":  remove_outliers(peak_mem_list).mean(),
         })
-        
-    df = pd.DataFrame(results)
-    return df
+
+    return pd.DataFrame(results)
 
 ###########################################
 # 3) 可视化函数：3D 散点图
@@ -265,8 +280,8 @@ def create_reduction_table(df, method_name):
 ###########################################
 if __name__ == "__main__":
     # 你可以在此修改输入数据与输出目录
-    # file_path = "data/LD.csv"
-    file_path = "data/heartrate.csv"
+    file_path = "data/LD.csv"
+    # file_path = "data/heartrate.csv"
     # file_path = "data/HKHS.csv"   
     # file_path = "data/ETTh1.csv" #可用！！！电力变压器温度 (ETT) 是电力长期部署的关键指标。该数据集由来自中国两个分离县的2年数据组成。为了探索长序列时间序列预测 (LSTF) 问题的粒度，创建了不同的子集，{ETTh1，ETTh2} 为1小时级，ETTm1为15分钟级。每个数据点由目标值 “油温” 和6个功率负载特征组成。火车/val/测试为12/4/4个月。https://opendatalab.com/OpenDataLab/ETT
     # file_path = "data/exchange_rate.csv"
@@ -312,7 +327,9 @@ if __name__ == "__main__":
         "method", 
         "sampling_rate", 
         "epsilon", 
+        "w",
         "mre", 
+        "peak_memory",
         "runtime", 
         "mre_reduction", 
         "runtime_reduction"
