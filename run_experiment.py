@@ -8,7 +8,7 @@ import matplotlib.pyplot as plt
 from mpl_toolkits.mplot3d import Axes3D
 import seaborn as sns
 import LBDLDP.LBD as LBD
-import PPLDP.PPLDP as PPLDP
+import PPLDP.ppldp as PPLDP
 import PatternLDP.patternLDP as patternLDP
 
 # sampling_rates = np.round(np.arange(0.50, 1.00 + 0.05, 0.05), 2)  # 0.2~1.0, 步长0.1
@@ -25,18 +25,22 @@ def run_experiments_parallel(file_path,
                              sampling_rates=None,
                              epsilon_values=None,
                              w_values=None,
-                             n_runs=15):
+                             n_runs=10):
     """
     并行执行多组实验，参数组合包括 sampling_rate、epsilon 和 窗口大小 w。
     返回 DataFrame，列: ['sampling_rate','epsilon','w','dtw','mre','runtime','peak_memory']
     """
     # 默认值
     if sampling_rates is None:
-        sampling_rates = np.arange(0.80, 0.81, 0.05).tolist()  # 0.8~1.0, 步长0.05
+        # sampling_rates = np.arange(0.5, 1.01, 0.1).tolist()  # 0.8~1.0, 步长0.05
+        sampling_rates = [0.6,0.7,0.8,0.9,1.0]  # 0.8~1.0, 步长0.05
+        # sampling_rates = [0.8]  # 0.8~1.0, 步长0.05
     if epsilon_values is None:
-        epsilon_values = np.arange(0.1, 1.1 , 0.1).tolist()
+        # epsilon_values = np.arange(0.1, 1.1 , 0.3).tolist()
+        epsilon_values = [10]  # 0.1~1.0, 步长0.1
     if w_values is None:
-        w_values = np.arange(200, 201, 20).tolist()
+        # w_values = np.arange(50, 151, 50).tolist()
+        w_values = [150]
 
     # 三重循环任务：sampling_rate × epsilon × w
     tasks = [
@@ -243,36 +247,57 @@ def plot_comparison_for_sampling_rates(res, output_dir="results/comparison"):
 def create_reduction_table(df, method_name):
     """
     给定一个包含 [sampling_rate, epsilon, mre, runtime] 等列的 DataFrame，
-    以 sampling_rate = 1.0 (不采样) 情况下的 (mre, runtime) 作为基准，计算：
+    以 sampling_rate = 1.0 情况下的 (mre, runtime) 作为基准，计算：
         - mre_reduction = (mre_ref - mre) / mre_ref
         - runtime_reduction = (runtime_ref - runtime) / runtime_ref
-
     并额外添加一列 method = method_name，方便后续拼接对比。
-    返回新增列的 DataFrame。
+    最终输出按 (sampling_rate, epsilon, w, method) 聚合唯一。
     """
-    # 1) 找到 sampling_rate=1.0 的基准行
+    # 1) 提取基准行（sampling_rate = 1.0）
     df_ref = df[df["sampling_rate"] == 1.0].copy()
-    df_ref = df_ref.rename(columns={
-        "mre": "mre_ref",
-        "runtime": "runtime_ref"
-    })
 
-    # 2) 把基准值合并回去（按照同样的 epsilon 来合并）
+    # 聚合处理，确保每个 epsilon 只有一行基准
+    df_ref = (
+        df_ref.groupby("epsilon", as_index=False)
+        .agg({
+            "mre": "mean",
+            "runtime": "mean"
+        })
+        .rename(columns={
+            "mre": "mre_ref",
+            "runtime": "runtime_ref"
+        })
+    )
+
+    # 2) 合并参考值
     df_merged = pd.merge(
         df,
-        df_ref[["epsilon", "mre_ref", "runtime_ref"]],  # 只保留参考列用于合并
+        df_ref,  # epsilon 对应的 baseline mre/runtime
         on="epsilon",
         how="left"
     )
 
-    # 3) 计算降低比例
-    df_merged["mre_reduction"] = (df_merged["mre_ref"] - df_merged["mre"]) / df_merged["mre_ref"]
-    df_merged["runtime_reduction"] = (df_merged["runtime_ref"] - df_merged["runtime"]) / df_merged["runtime_ref"]
+    # 3) 计算相对提升（注意处理除零）
+    df_merged["mre_reduction"] = (df_merged["mre_ref"] - df_merged["mre"]) / df_merged["mre_ref"].replace(0, np.nan)
+    df_merged["runtime_reduction"] = (df_merged["runtime_ref"] - df_merged["runtime"]) / df_merged["runtime_ref"].replace(0, np.nan)
 
-    # 4) 新增一列表示是哪个方法
+    # 4) 添加方法列
     df_merged["method"] = method_name
 
-    return df_merged
+    # 5) 聚合去重，确保 (x, ε, w, method) 唯一
+    df_unique = (
+        df_merged.groupby(["sampling_rate", "epsilon", "w", "method"], as_index=False)
+        .agg({
+            "dtw": "mean",
+            "mre": "mean",
+            "runtime": "mean",
+            "peak_memory": "mean",
+            "mre_reduction": "mean",
+            "runtime_reduction": "mean"
+        })
+    )
+
+    return df_unique
 
 
 ###########################################
@@ -280,11 +305,11 @@ def create_reduction_table(df, method_name):
 ###########################################
 if __name__ == "__main__":
     # 你可以在此修改输入数据与输出目录
-    file_path = "data/LD.csv"
+    # file_path = "data/LD.csv"
     # file_path = "data/heartrate.csv"
     # file_path = "data/HKHS.csv"   
     # file_path = "data/ETTh1.csv" #可用！！！电力变压器温度 (ETT) 是电力长期部署的关键指标。该数据集由来自中国两个分离县的2年数据组成。为了探索长序列时间序列预测 (LSTF) 问题的粒度，创建了不同的子集，{ETTh1，ETTh2} 为1小时级，ETTm1为15分钟级。每个数据点由目标值 “油温” 和6个功率负载特征组成。火车/val/测试为12/4/4个月。https://opendatalab.com/OpenDataLab/ETT
-    # file_path = "data/exchange_rate.csv"
+    file_path = "data/exchange_rate.csv"
     # file_path = "data/national_illness.csv"
     # file_path = "data/weather.csv"
     output_dir = "results"
@@ -316,7 +341,7 @@ if __name__ == "__main__":
 
     print("All done! Check the 'results/comparison/' folder for figures.")
 
-    # 生成减少率/提高率表格
+    # # 生成减少率/提高率表格
     df_lbd_table   = create_reduction_table(df_lbd,   method_name="LBD")
     df_ppldp_table = create_reduction_table(df_ppldp, method_name="PPLDP")
     df_pldp_table  = create_reduction_table(df_pldp,  method_name="PatternLDP")
@@ -328,6 +353,7 @@ if __name__ == "__main__":
         "sampling_rate", 
         "epsilon", 
         "w",
+        "dtw",
         "mre", 
         "peak_memory",
         "runtime", 

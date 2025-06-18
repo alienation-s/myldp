@@ -12,42 +12,37 @@ import tracemalloc
 
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../')))
 import utils.data_utils as data_utils
-
-def pattern_aware_sampling_feasible_space(df, delta=0.02):
+def pattern_aware_sampling(df, delta=0.02, pattern_slack=1.2):
+    """
+    按论文式 (5)-(6) 实现 PLA，但用 pattern_slack 放大 delta：
+      effective_delta = delta * pattern_slack
+    这样容差更大，采样点更少，模式保留相对更弱一些。
+    """
     vals = df['normalized_value'].to_numpy()
     n = len(vals)
     if n == 0:
         return []
 
-    sampled_indices = [0]
-    i = 0
-    while i < n - 1:
-        llow = -np.inf
-        lup = np.inf
-        j = i + 1
-        while j < n:
-            low_list = []
-            up_list = []
-            for k in range(i + 1, j):
-                denom = k - i
-                if denom == 0:
-                    continue
-                low_k = (vals[k] - delta - vals[i]) / denom
-                up_k = (vals[k] + delta - vals[i]) / denom
-                low_list.append(low_k)
-                up_list.append(up_k)
-            if low_list:
-                llow = max(llow, max(low_list))
-                lup = min(lup, min(up_list))
+    eff_delta = delta * pattern_slack
+    sampled = [0]
+    last = 0
+
+    while last < n - 1:
+        llow, lup = -np.inf, np.inf
+        for i in range(last + 1, n):
+            slope_low  = (vals[i] - vals[last] - eff_delta) / (i - last)
+            slope_up   = (vals[i] - vals[last] + eff_delta) / (i - last)
+            llow = max(llow, slope_low)
+            lup  = min(lup, slope_up)
             if llow > lup:
-                sampled_indices.append(j - 1)
-                i = j - 1
+                sampled.append(i - 1)
+                last = i - 1
                 break
-            j += 1
         else:
-            sampled_indices.append(n - 1)
+            sampled.append(n - 1)
             break
-    return sampled_indices
+
+    return sorted(set(sampled))
 
 def compute_importance(df, Kp=0.8, Ki=0.1, Kd=0.1, pi=5):
     if 'date' not in df.columns or 'normalized_value' not in df.columns:
@@ -80,132 +75,121 @@ def compute_importance(df, Kp=0.8, Ki=0.1, Kd=0.1, pi=5):
     df['importance'] = np.array(pro_list) + np.array(int_list) + np.array(der_list)
     return df['importance'].values
 
-def allocate_privacy_budget(df, total_budget, w=160, init_alpha=0.5):
+def allocate_privacy_budget(df, total_budget, w=160, init_alpha=0.5, eps_alpha=1e-6):
     """
-    Allocate per-point privacy budgets with dynamic equilibrium factor as in PatternLDP paper.
+    改动说明：
+      1. eps_alpha：用来保护 (1-alpha) 的下限，避免除以零。
+      2. 更新后将 alpha 限制到 [0, 1-eps_alpha]。
     """
-    df = df.copy()
-    n = len(df)
-    gamma_arr = np.clip(df['importance'].values, 1e-6, None)
+    gamma = np.clip(df['importance'].values, 1e-6, None)
+    n = len(gamma)
     budgets = np.zeros(n)
     alpha = init_alpha
-    # Correct threshold: total_budget divided by window size w
     epsilon_w = total_budget / w
 
     for i in range(n):
-        # Compute sum of budgets in the current sliding window
-        start_i = max(0, i - w + 1)
-        remaining = total_budget - budgets[start_i:i].sum()
-        # Gradient of equilibrium factor B(α) = α / (1 - α)
-        grad = 1.0 / (1.0 - alpha)**2
-        # Adjust alpha dynamically per Paper Eq.(12)
+        used = budgets[max(0, i - w + 1):i].sum()
+        remaining = total_budget - used
+
+        # 分母下限保护，避免 alpha → 1 时除以 0
+        denom = max(1.0 - alpha, eps_alpha)
+        grad = 1.0 / (denom ** 2)
+
+        # 按式 (12) 更新 α
         if remaining > total_budget / 2.0:
-            alpha = max(0.1, alpha - grad)
+            alpha = alpha - grad
         elif remaining < epsilon_w:
-            alpha = min(0.9, alpha + grad)
+            alpha = alpha + grad
+        # else: α 不变
+
+        # 将 alpha 限制在 [0, 1-eps_alpha]
+        alpha = min(max(alpha, 0.0), 1.0 - eps_alpha)
+
         beta = 1.0 - alpha
-        gamma_i = gamma_arr[i]
-        # Proportional function p = 1 - exp(-(α/γ + β γ))
-        p = 1 - np.exp(-(alpha / gamma_i + beta * gamma_i))
+        # 按式 (11) 计算采样概率 p
+        p = 1.0 - np.exp(-(alpha / gamma[i] + beta * gamma[i]))
         budgets[i] = remaining * p
 
     df['privacy_budget'] = budgets
     return df, alpha, 1.0 - alpha
 
-def sample_exponential_interval(v, eps, lower, upper):
-    L, R = v - lower, upper - v
-    A_left = (1 / eps) * (1 - math.exp(-eps * L))
-    A_right = (1 / eps) * (1 - math.exp(-eps * R))
-    Z = A_left + A_right
+
+def sample_trunc_exp(v, eps, b):
+    """
+    论文式 (14–15) 的截断指数逆变换采样：
+    在区间 [v − b, v + b] 上以密度 ∝ exp(−ε|x−v|) 采样。
+    """
+    if eps <= 0 or b <= 0:
+        return v
+    # 归一化常数 Z = 1−exp(−ε b)
+    Z = 1.0 - math.exp(-eps * b)
+    # 随机落点 u ∈ [0, Z]
     u = random.random() * Z
+    # 左侧累计 A_left = (1−exp(−ε b)) / ε
+    A_left = (1.0 - math.exp(-eps * b)) / eps
 
     if u <= A_left:
-        x_prime = - (1 / eps) * math.log(max(1e-15, 1 - eps * u))
-        return v - x_prime
+        # 落在左侧
+        x = - (1.0 / eps) * math.log(1.0 - eps * u)
+        return v - x
     else:
-        M2 = u - A_left
-        x_prime = - (1 / eps) * math.log(max(1e-15, 1 - eps * M2))
-        return v + x_prime
+        # 落在右侧
+        u2 = u - A_left
+        x = - (1.0 / eps) * math.log(1.0 - eps * u2)
+        return v + x
 
-def importance_aware_randomization_precise(df, theta=1.0, mu=0.1):
-    df = df.copy()
-    v_arr = df['normalized_value'].values
+def importance_aware_randomization(df, theta=1.0, mu=0.1, eps_Z=1e-6):
+    """
+    严格按论文式 (14),(15)：
+    — 先计算 b = log(θ/γ + μ)
+    — 以概率 q = ε/(2Z) 保留原值；否则在两侧截断指数分布上逆变换采样
+      这里对 Z 做下限保护，并对 q 做 [0,1] 限制，避免除零或 q>1。
+    """
+    v_arr   = df['normalized_value'].values
     eps_arr = df['privacy_budget'].values
-    gamma_arr = np.clip(df['importance'].values, 1e-6, None)
-    b_arr = np.clip(np.log(theta / gamma_arr + mu), 1e-3, None)
-    perturbed_values = []
+    gamma   = np.clip(df['importance'].values, 1e-6, None)
+    perturbed = np.empty_like(v_arr)
 
-    for i in range(len(df)):
-        v, eps, b = v_arr[i], eps_arr[i], b_arr[i]
-        if eps < 1e-6 or b <= 0:
-            perturbed_values.append(v)
+    for i, (v, eps, g) in enumerate(zip(v_arr, eps_arr, gamma)):
+        if eps <= 0:
+            perturbed[i] = v
             continue
-        lower, upper = v - b, v + b
-        perturbed_values.append(sample_exponential_interval(v, eps, lower, upper))
-    return perturbed_values
 
-def run_experiment(file_path,
-                   output_dir=None,
-                   w=100,
-                   total_budget=1.0,
-                   sample_fraction=1.0,
-                   delta=0.5,
-                   DTW_MRE=True,
-                   Kp=0.8, Ki=0.1, Kd=0.1, pi=5,
-                   theta=1.0, mu=0.1):
+        b = math.log(theta / g + mu)
+        if b <= 0:
+            perturbed[i] = v
+            continue
 
-    sample_data, origin_data = data_utils.preprocess_data(file_path, sample_fraction)
-    origin_length = len(origin_data)
-    assert 'date' in sample_data.columns, "'date' column required for PID-based importance."
+        # 归一化常数 Z = 1 − exp(−ε b)，并做下限保护
+        Z = 1.0 - math.exp(-eps * b)
+        Z = max(Z, eps_Z)
 
-    sample_data = sample_data.reset_index(drop=True)
-    idx_pla = pattern_aware_sampling_feasible_space(sample_data, delta=delta)
-    sample_data = sample_data.loc[idx_pla].copy().reset_index(drop=True)
+        # 计算保留原值的概率，并限制在 [0,1]
+        q = eps / (2.0 * Z)
+        q = min(max(q, 0.0), 1.0)
 
-    sample_data['importance'] = compute_importance(sample_data, Kp=Kp, Ki=Ki, Kd=Kd, pi=pi)
-    updated_data, alpha, beta = allocate_privacy_budget(sample_data, total_budget, w)
-    perturbed_vals = importance_aware_randomization_precise(updated_data, theta=theta, mu=mu)
-    updated_data['perturbed_value'] = perturbed_vals
+        if random.random() < q:
+            perturbed[i] = v
+        else:
+            perturbed[i] = sample_trunc_exp(v, eps, b)
 
-    updated_data['timestamp'] = updated_data.index
-    interpolated_values = data_utils.pla_interpolation(
-        updated_data[['timestamp', 'perturbed_value']], origin_length
-    )
+    return perturbed
 
-    dtw_distance, mre = None, None
-    if DTW_MRE:
-        original_series = origin_data['normalized_value'].values
-        with ThreadPoolExecutor() as executor:
-            f1 = executor.submit(data_utils.calculate_fdtw, original_series, interpolated_values)
-            f2 = executor.submit(data_utils.calculate_mre, interpolated_values, original_series)
-            dtw_distance = f1.result()
-            mre = f2.result()
-
-    return {
-        'origin_data': origin_data,
-        'sampled_data': updated_data,
-        'interpolated_values': interpolated_values,
-        'dtw_distance': dtw_distance,
-        'mre': mre,
-        'alpha': alpha,
-        'beta': beta
-    }
-
-def run_single_experiment(x, eps, file_path, w, delta=0.5, theta=1.0, mu=0.1):
+def run_single_experiment(x, eps, file_path, w, sample_method="uniform", delta=0.5, theta=1.0, mu=0.1):
     # 开始时间和内存监控
     start_time = time.time()
     tracemalloc.start()
-    sample_data, origin_data = data_utils.preprocess_data(file_path, x)
+    sample_data, origin_data = data_utils.preprocess_data(file_path, x, sample_method)
     origin_length = len(origin_data)
     assert 'date' in sample_data.columns, "'date' column required for PID-based importance."
 
     sample_data = sample_data.reset_index(drop=True)
-    idx_pla = pattern_aware_sampling_feasible_space(sample_data, delta=delta)
+    idx_pla = pattern_aware_sampling(sample_data, delta=delta)
     sample_data = sample_data.loc[idx_pla].copy().reset_index(drop=True)
 
     sample_data['importance'] = compute_importance(sample_data)
     updated_data, alpha, beta = allocate_privacy_budget(sample_data, eps, w)
-    perturbed_vals = importance_aware_randomization_precise(updated_data, theta=theta, mu=mu)
+    perturbed_vals = importance_aware_randomization(updated_data, theta=theta, mu=mu)
     updated_data['perturbed_value'] = perturbed_vals
 
     updated_data['timestamp'] = updated_data.index
@@ -231,19 +215,3 @@ def run_single_experiment(x, eps, file_path, w, delta=0.5, theta=1.0, mu=0.1):
         "runtime": elapsed_time,
         "peak_memory": peak_mem / 10**6,
     }
-
-if __name__ == "__main__":
-    file_path = 'data/LD.csv'
-    output_dir = 'results'
-    os.makedirs(output_dir, exist_ok=True)
-
-    result = run_experiment(
-        file_path,
-        output_dir,
-        sample_fraction=1.0,
-        total_budget=1.0,
-        w=160,
-        DTW_MRE=True
-    )
-
-    print(f"DTW: {result['dtw_distance']:.4f}, MRE: {result['mre']:.4f}")

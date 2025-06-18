@@ -7,80 +7,98 @@ import seaborn as sns
 
 random_seed = 42
 
-def preprocess_other_data(file_path, sample_fraction=1.0):
+def sample_data_method(data, sample_fraction, sample_method):
+    if sample_fraction >= 1.0:
+        return data
+
+    if sample_method == "uniform":
+        return data.sample(frac=sample_fraction, random_state=random_seed).sort_values(by='date')
+
+    elif sample_method == "reservoir":
+        # Reservoir sampling with fixed size
+        k = int(len(data) * sample_fraction)
+        if k <= 0:
+            return data.iloc[[]]
+        np.random.seed(random_seed)
+        indices = np.random.choice(len(data), size=k, replace=False)
+        return data.iloc[indices].sort_values(by='date')
+
+    elif sample_method == "stratified":
+        # Stratify by equally spaced time bins
+        n_bins = int(1.0 / sample_fraction)
+        data = data.copy()
+        data['bin'] = pd.qcut(data['date'].rank(method='first'), q=n_bins, labels=False, duplicates='drop')
+        sampled = data.groupby('bin').apply(lambda g: g.sample(frac=sample_fraction, random_state=random_seed)).reset_index(drop=True)
+        return sampled.sort_values(by='date')
+
+    else:
+        raise ValueError(f"Unsupported sample method: {sample_method}")
+
+def preprocess_other_data(file_path, sample_fraction=1.0, sample_method="uniform"):
     data = pd.read_csv(file_path)
     data['date'] = pd.to_datetime(data['date'], format='%Y/%m/%d %H:%M')
     data = data.sort_values(by='date')
     data['normalized_value'] = data['value']  # 保留字段名，但不做归一化
 
     origin_data = data[['date', 'normalized_value']].copy()
-
-    if sample_fraction < 1.0:
-        data = data.sample(frac=sample_fraction, random_state=random_seed).sort_values(by='date')
-
+    data = sample_data_method(data, sample_fraction, sample_method)
     sample_data = data[['date', 'normalized_value']].copy()
     return sample_data, origin_data
 
-def preprocess_HKHS_data(file_path, sample_fraction=1.0):
+def preprocess_HKHS_data(file_path, sample_fraction=1.0, sample_method="uniform"):
     data = pd.read_csv(file_path)
     data['date'] = pd.to_datetime(data['date'], format='%Y/%m/%d')
     data = data.sort_values(by='date')
     data['normalized_value'] = data['value']  # 保留字段名，但不做归一化
 
     origin_data = data[['date', 'normalized_value']].copy()
-
-    if sample_fraction < 1.0:
-        data = data.sample(frac=sample_fraction, random_state=random_seed).sort_values(by='date')
-
+    data = sample_data_method(data, sample_fraction, sample_method)
     sample_data = data[['date', 'normalized_value']].copy()
     return sample_data, origin_data
 
-def preprocess_heartrate_data(file_path, sample_fraction=1.0):
+def preprocess_heartrate_data(file_path, sample_fraction=1.0, sample_method="uniform"):
     data = pd.read_csv(file_path)
     data['date'] = pd.to_datetime(data['date'], unit='ms')
     data = data.sort_values(by='date')
     data['normalized_value'] = data['value']  # 保留字段名，但不做归一化
 
     origin_data = data[['date', 'normalized_value']].copy()
-
-    if sample_fraction < 1.0:
-        data = data.sample(frac=sample_fraction, random_state=random_seed).sort_values(by='date')
-
+    data = sample_data_method(data, sample_fraction, sample_method)
     sample_data = data[['date', 'normalized_value']].copy()
     return sample_data, origin_data
 
-def preprocess_ELD_data(file_path, sample_fraction=1.0):
+def preprocess_ELD_data(file_path, sample_fraction=1.0, sample_method="uniform"):
     data = pd.read_csv(file_path)
     data['date'] = pd.to_datetime(data['date'], format='%Y-%m-%d %H:%M:%S')
     data = data.sort_values(by='date')
     data['normalized_value'] = data['value']  # 保留字段名，但不做归一化
 
     origin_data = data[['date', 'normalized_value']].copy()
-
-    if sample_fraction < 1.0:
-        data = data.sample(frac=sample_fraction, random_state=random_seed).sort_values(by='date')
-
+    data = sample_data_method(data, sample_fraction, sample_method)
     sample_data = data[['date', 'normalized_value']].copy()
     return sample_data, origin_data
 
-def preprocess_data(file_path, sample_fraction=1.0):
+def preprocess_data(file_path, sample_fraction=1.0, sample_method="reservoir"):
     """
-    统一接口，根据文件名调用不同的预处理函数。
+    通用预处理入口
     参数:
         file_path (str): CSV 文件路径
         sample_fraction (float): 采样比例, 默认为 1.0 表示使用全部数据
+        sample_method (str): 采样方法, 可选值: 'uniform', 'reservoir', 'stratified'
     返回:
-        sample_data (pd.DataFrame): 采样后的数据，包括日期和归一化后的值
-        origin_data (pd.DataFrame): 原始数据，包括日期和归一化后的值
+        sample_data (pd.DataFrame): 采样后的数据
+        origin_data (pd.DataFrame): 原始数据
     """
+    # print("采样的方法："+ sample_method)
     if 'HKHS' in file_path:
-        return preprocess_HKHS_data(file_path, sample_fraction)
+        return preprocess_HKHS_data(file_path, sample_fraction, sample_method)
     elif 'heartrate' in file_path:
-        return preprocess_heartrate_data(file_path, sample_fraction)
+        return preprocess_heartrate_data(file_path, sample_fraction, sample_method)
     elif 'LD' in file_path:
-        return preprocess_ELD_data(file_path, sample_fraction)
+        return preprocess_ELD_data(file_path, sample_fraction, sample_method)
     else:
-        return preprocess_other_data(file_path, sample_fraction)
+        return preprocess_other_data(file_path, sample_fraction, sample_method)
+    
 
 def calculate_mre(perturbed_values, normalized_values):
     mre = np.mean(np.abs(perturbed_values - normalized_values) / (np.abs(normalized_values) + np.abs(perturbed_values) + 1e-8))

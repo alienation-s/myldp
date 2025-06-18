@@ -14,6 +14,18 @@ def calculate_slope(points):
     A = np.vstack([x, np.ones(len(x))]).T
     k, b = np.linalg.lstsq(A, y, rcond=None)[0]
     return k, b
+
+def calculate_slope_fast(start, end, sum_x, sum_y, sum_xy, sum_xx):
+    n = end - start + 1
+    Sx = sum_x[end + 1] - sum_x[start]
+    Sy = sum_y[end + 1] - sum_y[start]
+    Sxy = sum_xy[end + 1] - sum_xy[start]
+    Sxx = sum_xx[end + 1] - sum_xx[start]
+    
+    denominator = n * Sxx - Sx**2 + 1e-8  # 避免除以0
+    k = (n * Sxy - Sx * Sy) / denominator
+    b = (Sy - k * Sx) / n
+    return k, b
 def calculate_angle(k1, k2):
     """
     计算两条直线斜率之间的角度（tan θ）
@@ -69,37 +81,45 @@ def calculate_fluctuation_rate(errors, current_idx, kp=0.8, ks=0.1, kd=0.1, pi=5
 
 def remarkable_point_sampling(data, kp=0.8, ks=0.1, kd=0.1, pi=5):
     n = len(data)
-    points = [0]  # 初始化为包含第一个点
+    points = [0]  # 初始点
     i = 0
     errors = np.zeros(n)
-    
+
+    # 前缀和（用于拟合加速）
+    x = np.arange(n)
+    y = np.array(data)
+    sum_x = np.concatenate([[0], np.cumsum(x)])
+    sum_y = np.concatenate([[0], np.cumsum(y)])
+    sum_xy = np.concatenate([[0], np.cumsum(x * y)])
+    sum_xx = np.concatenate([[0], np.cumsum(x * x)])
+
     while i < n - 1:
         start = i
         for j in range(i + 1, n):
-            segment = np.array([[x, data[x]] for x in range(start, j + 1)])
-            k, b = calculate_slope(segment)
+            # 拟合 i~j 段的斜率 k 和截距 b
+            k, b = calculate_slope_fast(start, j, sum_x, sum_y, sum_xy, sum_xx)
             fitted_value = k * j + b
-            errors[j] = calculate_error(fitted_value, data[j])
-            
+            errors[j] = abs(fitted_value - data[j])
+
             if j + 1 < n:
-                k_next = (data[j + 1] - data[j]) / 1  # 时间间隔为1
-                if np.sign(k_next) != np.sign(k) and abs(k_next - k) > 0.1:
-                    points.append(j)
-                    i = j
-                    break
+                # 计算下一个斜率
+                k_next = data[j + 1] - data[j]
                 tan_theta = calculate_angle(k, k_next)
                 gamma = calculate_fluctuation_rate(errors, j, kp, ks, kd, pi)
                 tan_alpha = adaptive_angle_threshold(k, gamma)
+
                 if tan_theta > tan_alpha:
+                    # 拟合失败，当前点为显著点，重新开始新段拟合
                     points.append(j)
                     i = j
                     break
-        else:  # 如果内层循环没有break，则i递增
-            i += 1
-    # 确保最后一个点被包含
-    if points[-1] != n - 1:
-        points.append(n - 1)
-    
+            else:
+                # 最后一个点也要加入
+                if points[-1] != n - 1:
+                    points.append(n - 1)
+                i = n  # 终止外循环
+                break
+
     return points
 
 def adaptive_w_event_budget_allocation(slopes, fluctuation_rates, total_budget, w, data_length):
@@ -144,31 +164,37 @@ def adaptive_w_event_budget_allocation(slopes, fluctuation_rates, total_budget, 
 
     return allocated
 
-def sw_perturbation_w_event(values, budgets, min_budget=0.001):
-    """
-    论文中的 SW 机制，对所有数据点添加扰动
-    """
-    epsilons = np.maximum(budgets, min_budget)  # 确保每个点至少有最小预算
-    denominators = 2 * np.exp(epsilons) * (np.exp(epsilons) - 1 - epsilons)
-    valid_mask = denominators > 1e-10  # 过滤有效值
+def sw_perturbation_forced(values, budgets):
+    epsilons = np.maximum(budgets, 1e-3)  # 确保每个点至少有最小预算
+    # b = np.maximum(1.0 / epsilons, 1e-3) # 限制最小扰动范围
+    b = 1.0 / epsilons  
+    noise = np.random.laplace(scale=b, size=len(values))
+    return values + noise
+def sw_perturbation(values, budgets):
+    perturbed = []
+    for v, eps in zip(values, budgets):
+        eps = max(eps, 1e-3)
+        exp_eps = np.exp(eps)
 
-    # 计算 b[i]，根据论文公式
-    b = np.zeros_like(epsilons)
-    b[valid_mask] = (epsilons[valid_mask] * np.exp(epsilons[valid_mask]) 
-                    - np.exp(epsilons[valid_mask]) + 1) / denominators[valid_mask]
+        # 计算扰动范围 b[i]（论文公式 (19)）
+        numerator = eps * exp_eps - exp_eps + 1
+        denominator = 2 * exp_eps * (exp_eps - 1 - eps) + 1e-8  # 避免除0
+        b = numerator / denominator
+        b = max(b, 1e-6)
 
-    # 计算扰动概率
-    perturb_probs = np.exp(epsilons) / (2 * b * np.exp(epsilons) + 1)
+        # 概率定义（论文公式 (20)）
+        p = exp_eps / (2 * b * exp_eps + 1)
+        q = 1 / (2 * b * exp_eps + 1)
 
-    # 生成随机扰动
-    rand = np.random.rand(len(values))
-    perturb_mask = rand <= perturb_probs
-
-    # 添加噪声
-    laplace_noise = np.random.laplace(scale=b, size=len(values))
-    perturbed = np.where(perturb_mask, values, values + laplace_noise)
-
-    return perturbed
+        # 按概率采样扰动值
+        if np.random.rand() < p:
+            # 添加噪声在 [-b, b] 区间内
+            noise = np.random.uniform(-b, b)
+        else:
+            # 添加较大噪声（论文未明确定义，可选择合理范围）
+            noise = np.random.uniform(-3*b, 3*b)
+        perturbed.append(v + noise)
+    return np.array(perturbed)
 
 def kalman_filter(perturbed_values, process_variance=5e-4, measurement_variance=5e-3):
     """
@@ -191,96 +217,11 @@ def kalman_filter(perturbed_values, process_variance=5e-4, measurement_variance=
 
     return estimates
 
-# =========================================================================
-def run_experiment(file_path, output_dir, 
-                   sample_fraction=1.0, 
-                   total_budget=1.0, 
-                   w=160, 
-                   kp=0.8, 
-                   ks=0.1, 
-                   kd=0.1,
-                   process_variance=5e-4,
-                   measurement_variance=5e-3,
-                   DTW_MRE=True):
-    sample_data, origin_data = data_utils.preprocess_data(
-        file_path, 
-        sample_fraction,
-    ) # ['date', 'normalized_value'] 两个都是这样的格式
-    sample_normalized_data = sample_data['normalized_value'].values
-    sample_data_length = len(sample_normalized_data)
-    origin_normalized_data = origin_data['normalized_value'].values
-    origin_data_length = len(sample_normalized_data)
-    
-    # 显著点采样（使用优化后的版本）
-    start_time = datetime.datetime.now()  # 记录开始时间
-    significant_indices = remarkable_point_sampling(
-        sample_normalized_data, 
-        kp=kp, 
-        ks=ks, 
-        kd=kd
-    ) # 获取显著点的索引，是采样后的数据的显著点索引
-    # plot_utils.plot_significant_points(data, normalized_data, significant_indices, output_dir, current_date, sample_fraction)
-    
-    # 特征计算优化
-    slopes = np.gradient(sample_normalized_data[significant_indices])
-    fluctuation_rates = np.abs(slopes) + 1e-8  # 避免零值
-    
-    # 预算分配（使用优化后的版本）
-    allocated_budgets = adaptive_w_event_budget_allocation(
-        slopes, fluctuation_rates, total_budget, w, sample_data_length
-    )
-    # plot_utils.plot_budget_allocation(allocated_budgets, output_dir, current_date, sample_fraction)
-    
-    # 扰动（向量化版本）
-    perturbed_values = sw_perturbation_w_event(
-        sample_normalized_data, allocated_budgets
-    )
-    # plot_utils.plot_perturbed_values(data, normalized_data, significant_indices, perturbed_values, output_dir, current_date, sample_fraction)
-    
-    # 卡尔曼滤波（优化版本）
-    smoothed_values = kalman_filter(
-        perturbed_values, process_variance=process_variance, measurement_variance=measurement_variance
-    )
-    end_time = datetime.datetime.now()    # 记录结束时间
-    elapsed_time = end_time - start_time  # 计算时间差，得到一个 timedelta 对象
-    sample_data["smoothed_value"] = smoothed_values
-    # plot_utils.plot_kalman_smoothing(data, normalized_data, significant_indices, perturbed_values, smoothed_values, output_dir, current_date, sample_fraction)
-
-     # 插值
-    interpolated_data = data_utils.interpolate_missing_points(origin_data, sample_data)
-    interpolated_values = interpolated_data['smoothed_value']
-    # 并行计算评估指标
-    dtw_distance = None
-    mre = None
-    if DTW_MRE:
-        with ThreadPoolExecutor() as executor:
-            dtw_future = executor.submit(
-                data_utils.calculate_fdtw,
-                origin_normalized_data,
-                interpolated_values
-            ) # original_series, fitted_series
-            mre_future = executor.submit(
-                data_utils.calculate_mre,
-                interpolated_values,
-                origin_normalized_data
-            ) # perturbed_values, normalized_values
-            dtw_distance = dtw_future.result()
-            mre = mre_future.result()
-    
-    return {
-        'sample_normalized_data': sample_normalized_data,
-        'sample_significant_indices': significant_indices,
-        'sample_perturbed_values': perturbed_values,
-        'sample_smoothed_values': smoothed_values,
-        'dtw_distance': dtw_distance,
-        'mre': mre
-    }
-
-def run_single_experiment(x, eps, file_path, w):
+def run_single_experiment(x, eps, file_path, w, sample_method="uniform"):
     # 开始时间和内存监控
     start_time = time.time()
     tracemalloc.start()
-    sample_data, origin_data = data_utils.preprocess_data(file_path, x,) # ['date', 'normalized_value'] 两个都是这样的格式
+    sample_data, origin_data = data_utils.preprocess_data(file_path, x, sample_method) # ['date', 'normalized_value'] 两个都是这样的格式
     sample_normalized_data = sample_data['normalized_value'].values
     sample_data_length = len(sample_normalized_data)
     origin_normalized_data = origin_data['normalized_value'].values
@@ -300,13 +241,12 @@ def run_single_experiment(x, eps, file_path, w):
     
     # 预算分配（使用优化后的版本）
     allocated_budgets = adaptive_w_event_budget_allocation(
-        slopes, fluctuation_rates, x, w, sample_data_length
+        slopes, fluctuation_rates, eps, w, sample_data_length
     )
     
     # 扰动（向量化版本）
-    perturbed_values = sw_perturbation_w_event(
-        sample_normalized_data, allocated_budgets
-    )
+    perturbed_values = sw_perturbation(sample_normalized_data, allocated_budgets)
+    # perturbed_values = sw_perturbation_w_event(sample_normalized_data, allocated_budgets)
     
     # 卡尔曼滤波（优化版本）
     smoothed_values = kalman_filter(
@@ -347,3 +287,20 @@ def run_single_experiment(x, eps, file_path, w):
         "runtime": elapsed_time,
         "peak_memory": peak_mem / 10**6
     }
+
+
+if __name__ == "__main__":
+    # file_path = 'data/HKHS.csv'
+    # file_path = 'data/heartrate.csv'
+    file_path = 'data/LD.csv'
+    # file_path = "data/ETTh1.csv" #可用！！！电力变压器温度 (ETT) 是电力长期部署的关键指标。该数据集由来自中国两个分离县的2年数据组成。为了探索长序列时间序列预测 (LSTF) 问题的粒度，创建了不同的子集，{ETTh1，ETTh2} 为1小时级，ETTm1为15分钟级。每个数据点由目标值 “油温” 和6个功率负载特征组成。火车/val/测试为12/4/4个月。https://opendatalab.com/OpenDataLab/ETT
+    # file_path = "data/exchange_rate.csv"  
+    output_dir = 'results'
+    os.makedirs(output_dir, exist_ok=True)
+    res = run_single_experiment(
+        x=1, 
+        eps=1.0, 
+        file_path=file_path, 
+        w=160
+    )
+    print(res)
